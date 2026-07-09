@@ -1,4 +1,5 @@
 const express = require("express");
+const mongoose = require("mongoose");
 const Order = require("../models/Order");
 const Product = require("../models/Product");
 const { protect, adminOnly } = require("../middleware/auth");
@@ -6,26 +7,14 @@ const { validatePhone } = require("../utils/validators");
 
 const router = express.Router();
 
-// Stripe is optional — COD works without it (Stripe isn't available in every
-// country; for the FYP demo COD is always available).
-let stripe = null;
-if (process.env.STRIPE_SECRET_KEY) {
-  stripe = require("stripe")(process.env.STRIPE_SECRET_KEY);
-}
-
-const decrementStock = async (order) => {
-  for (const item of order.items) {
-    await Product.findByIdAndUpdate(item.product, { $inc: { stock: -item.qty } });
-  }
-};
-
 // ---------------- Customer ----------------
 
-// POST /api/orders  { items: [{ productId, qty }], shipping: { address, city, phone }, paymentMethod }
-// SECURITY: prices and stock are re-validated from the DB — client totals are never trusted.
+// POST /api/orders  { items: [{ productId, qty }], shipping: { address, city, phone } }
+// Cash on Delivery only. Prices and stock are re-validated from the DB —
+// client-side totals are never trusted (Vision 7.5).
 router.post("/", protect, async (req, res) => {
   try {
-    const { items, shipping, paymentMethod } = req.body;
+    const { items, shipping } = req.body;
     if (!Array.isArray(items) || items.length === 0) {
       return res.status(400).json({ message: "Your cart is empty" });
     }
@@ -43,11 +32,19 @@ router.post("/", protect, async (req, res) => {
     const orderItems = [];
     let itemsPrice = 0;
     for (const i of items) {
+      // Old carts (from the mock-data era) contain IDs like "p1" that aren't
+      // valid Mongo ObjectIds — reject them with a clear, actionable message.
+      if (!mongoose.isValidObjectId(i.productId)) {
+        return res.status(400).json({
+          message: "Your cart contains outdated items. Please clear your cart and add the products again.",
+        });
+      }
       const qty = Number(i.qty);
       if (!qty || qty < 1) return res.status(400).json({ message: "Invalid quantity" });
+
       const product = await Product.findById(i.productId);
       if (!product || !product.isActive) {
-        return res.status(400).json({ message: "A product in your cart is no longer available" });
+        return res.status(400).json({ message: "A product in your cart is no longer available. Please remove it and try again." });
       }
       if (product.stock < qty) {
         return res.status(400).json({ message: `Only ${product.stock} left of "${product.name}"` });
@@ -56,70 +53,23 @@ router.post("/", protect, async (req, res) => {
       itemsPrice += product.price * qty;
     }
 
-    const method = paymentMethod === "card" ? "card" : "cod";
-    if (method === "card" && !stripe) {
-      return res.status(400).json({ message: "Card payments are not configured yet. Please use Cash on Delivery." });
-    }
-
     const order = await Order.create({
       user: req.user._id,
       items: orderItems,
       shipping: { address: shipping.address.trim(), city: shipping.city.trim(), phone: shipping.phone.trim() },
-      paymentMethod: method,
       itemsPrice,
-      totalPrice: itemsPrice, // flat/free shipping for the prototype
-      status: method === "card" ? "Pending" : "Processing",
+      totalPrice: itemsPrice,
     });
 
-    if (method === "cod") {
-      await decrementStock(order);
-      return res.status(201).json({ order });
+    // Reserve stock immediately
+    for (const item of order.items) {
+      await Product.findByIdAndUpdate(item.product, { $inc: { stock: -item.qty } });
     }
 
-    // Card: create a Stripe Checkout session (test mode)
-    const session = await stripe.checkout.sessions.create({
-      mode: "payment",
-      customer_email: req.user.email,
-      line_items: order.items.map((i) => ({
-        price_data: {
-          currency: process.env.STRIPE_CURRENCY || "usd",
-          product_data: { name: i.name },
-          unit_amount: Math.round(i.price * 100),
-        },
-        quantity: i.qty,
-      })),
-      metadata: { orderId: order._id.toString() },
-      success_url: `${process.env.CLIENT_URL || "http://localhost:5173"}/orders?session_id={CHECKOUT_SESSION_ID}`,
-      cancel_url: `${process.env.CLIENT_URL || "http://localhost:5173"}/checkout`,
-    });
-    order.stripeSessionId = session.id;
-    await order.save();
-    res.status(201).json({ order, checkoutUrl: session.url });
+    res.status(201).json({ order });
   } catch (err) {
+    console.error("[orders] create failed:", err.message);
     res.status(500).json({ message: "Failed to place order" });
-  }
-});
-
-// GET /api/orders/verify-payment?session_id=...  (marks card order paid)
-router.get("/verify-payment", protect, async (req, res) => {
-  try {
-    if (!stripe) return res.status(400).json({ message: "Card payments are not configured" });
-    const session = await stripe.checkout.sessions.retrieve(req.query.session_id);
-    if (session.payment_status !== "paid") {
-      return res.status(400).json({ message: "Payment not completed" });
-    }
-    const order = await Order.findById(session.metadata.orderId);
-    if (!order) return res.status(404).json({ message: "Order not found" });
-    if (!order.isPaid) {
-      order.isPaid = true;
-      order.paidAt = new Date();
-      order.status = "Processing";
-      await decrementStock(order);
-      await order.save();
-    }
-    res.json({ order });
-  } catch {
-    res.status(500).json({ message: "Payment verification failed" });
   }
 });
 
@@ -141,8 +91,24 @@ router.get("/", protect, adminOnly, async (req, res) => {
 router.patch("/:id/status", protect, adminOnly, async (req, res) => {
   try {
     const { status } = req.body;
-    const order = await Order.findByIdAndUpdate(req.params.id, { status }, { new: true, runValidators: true });
+    const order = await Order.findById(req.params.id);
     if (!order) return res.status(404).json({ message: "Order not found" });
+    const previous = order.status;
+    order.status = status;
+
+    // COD: delivered means payment collected
+    if (status === "Delivered" && !order.isPaid) {
+      order.isPaid = true;
+      order.paidAt = new Date();
+    }
+    // Cancelling returns the reserved stock to inventory
+    if (status === "Cancelled" && previous !== "Cancelled") {
+      for (const item of order.items) {
+        await Product.findByIdAndUpdate(item.product, { $inc: { stock: item.qty } });
+      }
+    }
+
+    await order.save();
     res.json({ order });
   } catch {
     res.status(400).json({ message: "Invalid status" });
