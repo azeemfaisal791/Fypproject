@@ -1,50 +1,72 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { apiRequest } from "../../api";
 
-// Order management UI (Vision 5.7). Demo data until the orders API exists.
-const initialOrders = [
-  { id: "ORD-1031", customer: "Ali Raza", date: "2026-07-08", total: 4999, status: "Processing" },
-  { id: "ORD-1030", customer: "Sara Khan", date: "2026-07-08", total: 15498, status: "Processing" },
-  { id: "ORD-1029", customer: "Usman Tariq", date: "2026-07-07", total: 2999, status: "Shipped" },
-  { id: "ORD-1024", customer: "Ali Raza", date: "2026-07-05", total: 11497, status: "Delivered" },
-  { id: "ORD-1019", customer: "Hina Malik", date: "2026-07-03", total: 6499, status: "Delivered" },
-];
+const statuses = ["Pending", "Processing", "Shipped", "Delivered", "Cancelled"];
 
-const statuses = ["Processing", "Shipped", "Delivered", "Cancelled"];
-
+// Order management (Vision 5.7) — live data from /api/orders.
 export default function AdminOrders() {
-  const [orders, setOrders] = useState(initialOrders);
+  const [orders, setOrders] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
 
-  const setStatus = (id, status) =>
-    setOrders((prev) => prev.map((o) => (o.id === id ? { ...o, status } : o)));
+  const load = () => {
+    apiRequest("/orders")
+      .then((d) => setOrders(d.orders))
+      .catch((e) => setError(e.message))
+      .finally(() => setLoading(false));
+  };
+
+  useEffect(load, []);
+
+  const setStatus = async (id, status) => {
+    try {
+      await apiRequest(`/orders/${id}/status`, { method: "PATCH", body: { status } });
+      setOrders((prev) => prev.map((o) => (o.id === id ? { ...o, status } : o)));
+    } catch (e) {
+      alert(e.message);
+    }
+  };
+
+  if (loading) return <div><h1>Orders</h1><p className="muted">Loading...</p></div>;
 
   return (
     <div>
       <h1>Orders</h1>
-      <p className="muted" style={{ marginBottom: 14 }}>
-        Demo orders - will load from the database when the orders module is connected.
-      </p>
-      <div className="table-wrap">
-        <table>
-          <thead>
-            <tr><th>Order</th><th>Customer</th><th>Date</th><th>Total</th><th>Status</th></tr>
-          </thead>
-          <tbody>
-            {orders.map((o) => (
-              <tr key={o.id}>
-                <td>{o.id}</td>
-                <td>{o.customer}</td>
-                <td>{o.date}</td>
-                <td>Rs {o.total.toLocaleString()}</td>
-                <td>
-                  <select value={o.status} onChange={(e) => setStatus(o.id, e.target.value)}>
-                    {statuses.map((s) => <option key={s}>{s}</option>)}
-                  </select>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+      <p className="muted" style={{ marginBottom: 14 }}>Live orders from the database.</p>
+      {error && <div className="error-msg">{error}</div>}
+      {orders.length === 0 ? (
+        <p className="muted">No orders yet.</p>
+      ) : (
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr><th>Order</th><th>Customer</th><th>Items</th><th>Total</th><th>Payment</th><th>Status</th></tr>
+            </thead>
+            <tbody>
+              {orders.map((o) => (
+                <tr key={o.id}>
+                  <td title={o.id}>
+                    #{o.id.slice(-6).toUpperCase()}
+                    <div className="muted">{new Date(o.createdAt).toLocaleDateString()}</div>
+                  </td>
+                  <td>
+                    {o.user?.name || "-"}
+                    <div className="muted">{o.user?.email}</div>
+                  </td>
+                  <td>{o.items.map((i) => `${i.name} x${i.qty}`).join(", ")}</td>
+                  <td>Rs {o.totalPrice.toLocaleString()}</td>
+                  <td>{o.isPaid ? "Paid (card)" : o.paymentMethod === "cod" ? "COD" : "Unpaid"}</td>
+                  <td>
+                    <select value={o.status} onChange={(e) => setStatus(o.id, e.target.value)}>
+                      {statuses.map((s) => <option key={s}>{s}</option>)}
+                    </select>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   );
 }

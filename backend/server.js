@@ -4,6 +4,10 @@ const mongoose = require("mongoose");
 const cors = require("cors");
 
 const authRoutes = require("./routes/authRoutes");
+const productRoutes = require("./routes/productRoutes");
+const orderRoutes = require("./routes/orderRoutes");
+const chatRoutes = require("./routes/chatRoutes");
+const recommendationRoutes = require("./routes/recommendationRoutes");
 
 const app = express();
 
@@ -12,6 +16,10 @@ app.use(express.json());
 
 // Routes
 app.use("/api/auth", authRoutes);
+app.use("/api/products", productRoutes);
+app.use("/api/orders", orderRoutes);
+app.use("/api/chat", chatRoutes);
+app.use("/api/recommendations", recommendationRoutes);
 
 app.get("/api/health", (req, res) => {
   res.json({ status: "ok", message: "AI E-Commerce backend running" });

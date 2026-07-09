@@ -1,94 +1,86 @@
-import { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useEffect, useState } from "react";
+import { useParams, Link, useNavigate } from "react-router-dom";
+import { apiRequest } from "../api";
+import ProductCard from "../components/ProductCard.jsx";
 import { useCart } from "../context/CartContext.jsx";
-import { validatePhone } from "../validators.js";
 
-// Checkout UI is complete; actual order creation + Stripe test payment
-// will connect when the orders backend module is built (Vision 5.6, 5.8).
-export default function Checkout() {
-  const { items, total, clearCart } = useCart();
+export default function ProductDetail() {
+  const { id } = useParams();
   const navigate = useNavigate();
-  const [form, setForm] = useState({ address: "", city: "", phone: "", payment: "card" });
-  const [placed, setPlaced] = useState(false);
-  const [error, setError] = useState("");
+  const { addItem } = useCart();
+  const [product, setProduct] = useState(null);
+  const [similar, setSimilar] = useState([]);
+  const [notFound, setNotFound] = useState(false);
 
-  const set = (k) => (e) => setForm({ ...form, [k]: e.target.value });
+  useEffect(() => {
+    setProduct(null);
+    setNotFound(false);
+    // auth:true → the view is recorded in browsingHistory when logged in,
+    // which powers the AI recommendations (Vision 5.1)
+    apiRequest(`/products/${id}`)
+      .then((p) => {
+        setProduct(p);
+        return apiRequest(`/products?category=${encodeURIComponent(p.category)}&limit=5`, { auth: false });
+      })
+      .then((d) => d && setSimilar(d.products.filter((s) => s.id !== id).slice(0, 4)))
+      .catch(() => setNotFound(true));
+    window.scrollTo(0, 0);
+  }, [id]);
 
-  const placeOrder = (e) => {
-    e.preventDefault();
-    setError("");
-    if (form.address.trim().length < 5) return setError("Please enter a complete delivery address");
-    const badPhone = validatePhone(form.phone);
-    if (badPhone) return setError(badPhone);
-    // Placeholder: will POST /api/orders and trigger Stripe test payment
-    setPlaced(true);
-    clearCart();
-    setTimeout(() => navigate("/orders"), 1800);
-  };
-
-  if (placed) {
+  if (notFound) {
     return (
       <div className="container page">
-        <h1>Order placed (demo)</h1>
-        <p className="muted">
-          This is a placeholder confirmation. Real order storage and Stripe test
-          payment will be wired in the orders phase. Redirecting to your orders...
-        </p>
+        <h1>Product not found</h1>
+        <Link to="/products">Back to products</Link>
       </div>
     );
   }
 
-  if (items.length === 0) {
-    return (
-      <div className="container page">
-        <h1>Checkout</h1>
-        <p className="muted">Your cart is empty.</p>
-      </div>
-    );
-  }
+  if (!product) return <div className="container page"><p className="muted">Loading...</p></div>;
+
+  const outOfStock = product.stock <= 0;
 
   return (
     <div className="container page">
-      <h1>Checkout</h1>
-      <div style={{ display: "flex", gap: 32, flexWrap: "wrap", marginTop: 16 }}>
-        <form onSubmit={placeOrder} style={{ flex: 1, minWidth: 280, maxWidth: 440 }}>
-          {error && <div className="error-msg">{error}</div>}
-          <div className="field">
-            <label>Delivery address</label>
-            <input value={form.address} onChange={set("address")} required />
-          </div>
-          <div className="field">
-            <label>City</label>
-            <input value={form.city} onChange={set("city")} required />
-          </div>
-          <div className="field">
-            <label>Phone</label>
-            <input value={form.phone} onChange={set("phone")} required />
-          </div>
-          <div className="field">
-            <label>Payment method</label>
-            <select value={form.payment} onChange={set("payment")}>
-              <option value="card">Card (Stripe - test mode, coming soon)</option>
-              <option value="cod">Cash on delivery</option>
-            </select>
-          </div>
-          <button className="btn" style={{ width: "100%" }}>Place order</button>
-        </form>
-        <div className="cart-summary" style={{ marginTop: 0 }}>
-          <strong>Order summary</strong>
-          {items.map((i) => (
-            <div key={i.id} style={{ display: "flex", justifyContent: "space-between", fontSize: 14, margin: "8px 0" }}>
-              <span>{i.name} x {i.qty}</span>
-              <span>Rs {(i.price * i.qty).toLocaleString()}</span>
-            </div>
-          ))}
-          <hr style={{ border: "none", borderTop: "1px solid var(--border)", margin: "10px 0" }} />
-          <div style={{ display: "flex", justifyContent: "space-between" }}>
-            <span>Total</span>
-            <strong>Rs {total.toLocaleString()}</strong>
+      <div style={{ display: "flex", gap: 32, flexWrap: "wrap" }}>
+        <img
+          src={product.image}
+          alt={product.name}
+          style={{ width: 380, maxWidth: "100%", borderRadius: 6, border: "1px solid var(--border)" }}
+        />
+        <div style={{ flex: 1, minWidth: 260 }}>
+          <h1>{product.name}</h1>
+          <p className="muted">
+            {product.category} - {outOfStock ? "out of stock" : `${product.stock} in stock`}
+          </p>
+          <p className="price" style={{ fontSize: 22, margin: "12px 0" }}>
+            Rs {product.price.toLocaleString()}
+          </p>
+          <p style={{ marginBottom: 20 }}>{product.description}</p>
+          <div style={{ display: "flex", gap: 10 }}>
+            <button className="btn" onClick={() => addItem(product)} disabled={outOfStock}>
+              {outOfStock ? "Out of stock" : "Add to cart"}
+            </button>
+            {!outOfStock && (
+              <button
+                className="btn btn-outline"
+                onClick={() => { addItem(product); navigate("/cart"); }}
+              >
+                Buy now
+              </button>
+            )}
           </div>
         </div>
       </div>
+
+      {similar.length > 0 && (
+        <>
+          <h2 className="section-title">Similar products</h2>
+          <div className="grid">
+            {similar.map((p) => <ProductCard key={p.id} product={p} />)}
+          </div>
+        </>
+      )}
     </div>
   );
 }

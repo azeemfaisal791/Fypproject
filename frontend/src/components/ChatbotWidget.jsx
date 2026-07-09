@@ -1,24 +1,40 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { apiRequest } from "../api";
 
-// UI shell for the AI chatbot (Vision 5.2). Replies are placeholder logic
-// until the OpenAI-powered /api/chat backend route is built in the AI phase.
+// AI chatbot (Vision 5.2) — now live via POST /api/chat (OpenAI-powered).
 export default function ChatbotWidget() {
   const [open, setOpen] = useState(false);
   const [input, setInput] = useState("");
+  const [busy, setBusy] = useState(false);
   const [messages, setMessages] = useState([
-    { from: "bot", text: "Hi! I'm your shopping assistant. Ask me about products, orders, or how to use the site." },
+    { from: "bot", text: "Hi! I'm your shopping assistant. Ask me about products, prices, or your orders." },
   ]);
+  const endRef = useRef(null);
 
-  const send = (e) => {
+  useEffect(() => {
+    endRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages, open]);
+
+  const send = async (e) => {
     e.preventDefault();
     const text = input.trim();
-    if (!text) return;
-    setMessages((m) => [
-      ...m,
-      { from: "user", text },
-      { from: "bot", text: "The AI assistant will be connected in the next phase (OpenAI API). For now, browse Products or use voice search from the search bar." },
-    ]);
+    if (!text || busy) return;
     setInput("");
+    const history = messages.slice(-8); // context for the AI
+    setMessages((m) => [...m, { from: "user", text }]);
+    setBusy(true);
+    try {
+      // auth:true → logged-in users can ask about their own orders
+      const data = await apiRequest("/chat", {
+        method: "POST",
+        body: { message: text, history },
+      });
+      setMessages((m) => [...m, { from: "bot", text: data.reply }]);
+    } catch (err) {
+      setMessages((m) => [...m, { from: "bot", text: err.message }]);
+    } finally {
+      setBusy(false);
+    }
   };
 
   return (
@@ -33,14 +49,17 @@ export default function ChatbotWidget() {
             {messages.map((m, i) => (
               <div key={i} className={`msg ${m.from}`}>{m.text}</div>
             ))}
+            {busy && <div className="msg bot">Typing...</div>}
+            <div ref={endRef} />
           </div>
           <form className="chatbot-input" onSubmit={send}>
             <input
               value={input}
               onChange={(e) => setInput(e.target.value)}
               placeholder="Type a message..."
+              maxLength={500}
             />
-            <button type="submit">Send</button>
+            <button type="submit" disabled={busy}>Send</button>
           </form>
         </div>
       )}

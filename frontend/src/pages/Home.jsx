@@ -1,14 +1,25 @@
+import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import mockProducts from "../data/mockProducts.js";
+import { apiRequest } from "../api";
 import ProductCard from "../components/ProductCard.jsx";
 import { useAuth } from "../context/AuthContext.jsx";
 
 export default function Home() {
   const { user } = useAuth();
-  // Placeholder for AI recommendations (Vision 5.1): once the AI module is
-  // built, this section will call GET /api/recommendations for this user.
-  const recommended = mockProducts.slice(0, 4);
-  const latest = mockProducts.slice(4, 8);
+  const [recommended, setRecommended] = useState([]);
+  const [recSource, setRecSource] = useState("popular");
+  const [latest, setLatest] = useState([]);
+
+  useEffect(() => {
+    // AI recommendations (Vision 5.1) — personalized when logged in,
+    // popular items for guests. `auth: true` sends the token if present.
+    apiRequest("/recommendations?limit=4")
+      .then((d) => { setRecommended(d.products); setRecSource(d.source); })
+      .catch(() => {});
+    apiRequest("/products?sort=newest&limit=4", { auth: false })
+      .then((d) => setLatest(d.products))
+      .catch(() => {});
+  }, [user]);
 
   return (
     <div className="page" style={{ paddingTop: 0 }}>
@@ -25,11 +36,15 @@ export default function Home() {
 
       <div className="container">
         <h2 className="section-title">
-          {user ? `Recommended for you, ${user.name.split(" ")[0]}` : "Popular right now"}
+          {user && recSource === "ai"
+            ? `Recommended for you, ${user.name.split(" ")[0]}`
+            : "Popular right now"}
         </h2>
-        <p className="muted" style={{ marginBottom: 14 }}>
-          AI-powered personalization will activate in the next phase - showing popular items for now.
-        </p>
+        {user && recSource === "ai" && (
+          <p className="muted" style={{ marginBottom: 14 }}>
+            Picked by AI based on products you've viewed.
+          </p>
+        )}
         <div className="grid">
           {recommended.map((p) => <ProductCard key={p.id} product={p} />)}
         </div>

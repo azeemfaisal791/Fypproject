@@ -23,10 +23,27 @@ const protect = async (req, res, next) => {
   }
 };
 
+// Attaches req.user if a valid token is present, but never blocks the request.
+// Used on public routes that personalize when logged in (product views,
+// recommendations, chatbot) — Vision 5.1 / 5.2.
+const optionalAuth = async (req, res, next) => {
+  try {
+    const header = req.headers.authorization;
+    if (header && header.startsWith("Bearer ")) {
+      const decoded = jwt.verify(header.split(" ")[1], process.env.JWT_SECRET);
+      const user = await User.findById(decoded.id);
+      if (user && user.isActive) req.user = user;
+    }
+  } catch (err) {
+    // ignore — request continues as guest
+  }
+  next();
+};
+
 // Role-based authorization (Vision 7.5)
 const adminOnly = (req, res, next) => {
   if (req.user && req.user.role === "admin") return next();
   return res.status(403).json({ message: "Access denied: admin only" });
 };
 
-module.exports = { protect, adminOnly };
+module.exports = { protect, optionalAuth, adminOnly };

@@ -1,21 +1,37 @@
-import { useState } from "react";
-import mockProducts from "../data/mockProducts.js";
+import { useEffect, useState } from "react";
+import { apiRequest } from "../api";
 import ProductCard from "../components/ProductCard.jsx";
 import SearchBar from "../components/SearchBar.jsx";
 
 export default function Products() {
   const [query, setQuery] = useState("");
   const [category, setCategory] = useState("All");
+  const [categories, setCategories] = useState(["All"]);
+  const [products, setProducts] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
 
-  const categories = ["All", ...new Set(mockProducts.map((p) => p.category))];
+  useEffect(() => {
+    apiRequest("/products/categories", { auth: false })
+      .then((d) => setCategories(["All", ...d.categories]))
+      .catch(() => {});
+  }, []);
 
-  const filtered = mockProducts.filter((p) => {
-    const matchesText =
-      p.name.toLowerCase().includes(query.toLowerCase()) ||
-      p.description.toLowerCase().includes(query.toLowerCase());
-    const matchesCat = category === "All" || p.category === category;
-    return matchesText && matchesCat;
-  });
+  // Small debounce so we don't hit the API on every keystroke
+  useEffect(() => {
+    const t = setTimeout(() => {
+      setLoading(true);
+      setError("");
+      const params = new URLSearchParams();
+      if (query) params.set("keyword", query);
+      if (category !== "All") params.set("category", category);
+      apiRequest(`/products?${params.toString()}`, { auth: false })
+        .then((d) => setProducts(d.products))
+        .catch(() => setError("Could not load products. Is the backend running?"))
+        .finally(() => setLoading(false));
+    }, 300);
+    return () => clearTimeout(t);
+  }, [query, category]);
 
   return (
     <div className="container page">
@@ -33,11 +49,14 @@ export default function Products() {
           </button>
         ))}
       </div>
-      {filtered.length === 0 ? (
+      {error && <div className="error-msg">{error}</div>}
+      {loading ? (
+        <p className="muted">Loading products...</p>
+      ) : products.length === 0 ? (
         <p className="muted">No products match your search. Try a different keyword.</p>
       ) : (
         <div className="grid">
-          {filtered.map((p) => <ProductCard key={p.id} product={p} />)}
+          {products.map((p) => <ProductCard key={p.id} product={p} />)}
         </div>
       )}
     </div>
