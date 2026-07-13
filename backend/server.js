@@ -13,6 +13,7 @@ const productRoutes = require("./routes/productRoutes");
 const orderRoutes = require("./routes/orderRoutes");
 const chatRoutes = require("./routes/chatRoutes");
 const recommendationRoutes = require("./routes/recommendationRoutes");
+const visualSearchRoutes = require("./routes/visualSearchRoutes");
 
 const app = express();
 
@@ -25,6 +26,7 @@ app.use("/api/products", productRoutes);
 app.use("/api/orders", orderRoutes);
 app.use("/api/chat", chatRoutes);
 app.use("/api/recommendations", recommendationRoutes);
+app.use("/api/search", visualSearchRoutes); // Visual Search (Vision 5.3)
 
 app.get("/api/health", (req, res) => {
   res.json({ status: "ok", message: "AI E-Commerce backend running" });

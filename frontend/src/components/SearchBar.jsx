@@ -1,11 +1,12 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 
-// Text search works now. Voice search uses the browser's Web Speech API
-// as a placeholder until the OpenAI Whisper backend route is added.
-// Visual search button is a placeholder for the image-search module (Vision 5.3).
-export default function SearchBar({ onSearch }) {
+// Text search works. Voice search uses the browser's Web Speech API.
+// Image search (Vision 5.3): pick a product photo from disk → the parent
+// page uploads it to POST /api/search/visual and shows the matches.
+export default function SearchBar({ onSearch, onImageSelect, imageBusy = false }) {
   const [query, setQuery] = useState("");
   const [listening, setListening] = useState(false);
+  const fileRef = useRef(null);
 
   const submit = (e) => {
     e.preventDefault();
@@ -31,8 +32,20 @@ export default function SearchBar({ onSearch }) {
     rec.start();
   };
 
-  const visualSearch = () => {
-    alert("Visual search will be enabled when the image-search AI module is added (next phase).");
+  const pickImage = (e) => {
+    const file = e.target.files?.[0];
+    // Reset the input so choosing the SAME file again still fires onChange
+    e.target.value = "";
+    if (!file) return;
+    if (!file.type.startsWith("image/")) {
+      alert("Please choose an image file (JPG, PNG or WebP).");
+      return;
+    }
+    if (file.size > 8 * 1024 * 1024) {
+      alert("Image is too large. Please choose an image under 8MB.");
+      return;
+    }
+    onImageSelect?.(file);
   };
 
   return (
@@ -49,8 +62,23 @@ export default function SearchBar({ onSearch }) {
       <button type="button" className="icon-btn" onClick={startVoice} title="Voice search">
         {listening ? "Listening..." : "Voice"}
       </button>
-      <button type="button" className="icon-btn" onClick={visualSearch} title="Search by image">
-        Image
+
+      {/* Hidden file input; the visible button just opens it */}
+      <input
+        ref={fileRef}
+        type="file"
+        accept="image/*"
+        style={{ display: "none" }}
+        onChange={pickImage}
+      />
+      <button
+        type="button"
+        className="icon-btn"
+        onClick={() => fileRef.current?.click()}
+        disabled={imageBusy}
+        title="Search by image"
+      >
+        {imageBusy ? "Searching..." : "Image"}
       </button>
     </form>
   );
