@@ -1,4 +1,5 @@
 const express = require("express");
+const mongoose = require("mongoose");
 const Product = require("../models/Product");
 const { protect, adminOnly, optionalAuth } = require("../middleware/auth");
 
@@ -19,7 +20,7 @@ const validateProduct = (b) => {
 router.get("/", async (req, res) => {
   try {
     const page = Math.max(1, parseInt(req.query.page) || 1);
-    const limit = Math.min(48, parseInt(req.query.limit) || 24);
+    const limit = Math.min(120, parseInt(req.query.limit) || 24);
     const { keyword, category, sort } = req.query;
 
     const filter = { isActive: true };
@@ -49,15 +50,33 @@ router.get("/categories", async (req, res) => {
   }
 });
 
+// POST /api/products/check  { ids: [...] }
+// Cart synchronization: returns which of the given products still exist and
+// are active, with their CURRENT price and stock. The cart page uses this to
+// drop deleted items and refresh stale prices (e.g. after a DB reseed).
+router.post("/check", async (req, res) => {
+  try {
+    const ids = (Array.isArray(req.body.ids) ? req.body.ids : []).filter((id) =>
+      mongoose.isValidObjectId(id)
+    );
+    const products = await Product.find({ _id: { $in: ids }, isActive: true });
+    res.json({ products });
+  } catch {
+    res.status(500).json({ message: "Failed to check products" });
+  }
+});
+
 // GET /api/products/:id — also records browsing history for logged-in
 // customers (feeds the AI recommendation engine, Vision 5.1)
 router.get("/:id", optionalAuth, async (req, res) => {
   try {
+    if (!mongoose.isValidObjectId(req.params.id)) {
+      return res.status(404).json({ message: "Product not found" });
+    }
     const product = await Product.findById(req.params.id);
     if (!product || !product.isActive) return res.status(404).json({ message: "Product not found" });
 
     if (req.user && req.user.role === "customer") {
-      // keep last 20 views, most recent last, no immediate duplicates
       const history = (req.user.browsingHistory || []).filter((p) => String(p) !== String(product._id));
       history.push(product._id);
       req.user.browsingHistory = history.slice(-20);
@@ -87,7 +106,7 @@ router.post("/", protect, adminOnly, async (req, res) => {
       description,
       price: Number(price),
       category: category.trim(),
-      image: image || `https://picsum.photos/seed/${encodeURIComponent(name)}/400/300`,
+      image: image || `https://loremflickr.com/600/450/menswear?random=${Date.now()}`,
       stock: Number(stock) || 0,
       createdBy: req.user._id,
     });

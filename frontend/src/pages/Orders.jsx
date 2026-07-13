@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useLocation, useSearchParams } from "react-router-dom";
+import { useLocation } from "react-router-dom";
 import { apiRequest } from "../api";
 
 const pillClass = (status) =>
@@ -7,30 +7,19 @@ const pillClass = (status) =>
 
 export default function Orders() {
   const location = useLocation();
-  const [params, setParams] = useSearchParams();
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [notice, setNotice] = useState(location.state?.justOrdered ? "Order placed successfully!" : "");
   const [error, setError] = useState("");
+  const notice = location.state?.justOrdered
+    ? "Order placed successfully! You'll pay in cash on delivery."
+    : "";
 
   useEffect(() => {
-    const sessionId = params.get("session_id");
-    const load = () =>
-      apiRequest("/orders/my")
-        .then((d) => setOrders(d.orders))
-        .catch((e) => setError(e.message))
-        .finally(() => setLoading(false));
-
-    if (sessionId) {
-      // Returned from Stripe checkout — confirm payment first
-      apiRequest(`/orders/verify-payment?session_id=${encodeURIComponent(sessionId)}`)
-        .then(() => setNotice("Payment successful! Your order is confirmed."))
-        .catch(() => setError("We couldn't confirm the payment. If you were charged, contact support."))
-        .finally(() => { setParams({}, { replace: true }); load(); });
-    } else {
-      load();
-    }
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+    apiRequest("/orders/my")
+      .then((d) => setOrders(d.orders))
+      .catch((e) => setError(e.message))
+      .finally(() => setLoading(false));
+  }, []);
 
   if (loading) return <div className="container page"><h1>My orders</h1><p className="muted">Loading...</p></div>;
 
@@ -54,7 +43,7 @@ export default function Orders() {
                   <td>{new Date(o.createdAt).toLocaleDateString()}</td>
                   <td>{o.items.map((i) => `${i.name} x${i.qty}`).join(", ")}</td>
                   <td>Rs {o.totalPrice.toLocaleString()}</td>
-                  <td>{o.isPaid ? "Paid (card)" : o.paymentMethod === "cod" ? "Cash on delivery" : "Unpaid"}</td>
+                  <td>{o.isPaid ? "Paid" : "Cash on delivery"}</td>
                   <td><span className={`pill ${pillClass(o.status)}`}>{o.status}</span></td>
                 </tr>
               ))}

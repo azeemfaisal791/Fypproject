@@ -1,86 +1,96 @@
-import { useEffect, useState } from "react";
-import { useParams, Link, useNavigate } from "react-router-dom";
+import { useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { apiRequest } from "../api";
-import ProductCard from "../components/ProductCard.jsx";
 import { useCart } from "../context/CartContext.jsx";
+import { validatePhone } from "../validators.js";
 
-export default function ProductDetail() {
-  const { id } = useParams();
+export default function Checkout() {
+  const { items, total, clearCart } = useCart();
   const navigate = useNavigate();
-  const { addItem } = useCart();
-  const [product, setProduct] = useState(null);
-  const [similar, setSimilar] = useState([]);
-  const [notFound, setNotFound] = useState(false);
+  const [form, setForm] = useState({ address: "", city: "", phone: "" });
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
 
-  useEffect(() => {
-    setProduct(null);
-    setNotFound(false);
-    // auth:true → the view is recorded in browsingHistory when logged in,
-    // which powers the AI recommendations (Vision 5.1)
-    apiRequest(`/products/${id}`)
-      .then((p) => {
-        setProduct(p);
-        return apiRequest(`/products?category=${encodeURIComponent(p.category)}&limit=5`, { auth: false });
-      })
-      .then((d) => d && setSimilar(d.products.filter((s) => s.id !== id).slice(0, 4)))
-      .catch(() => setNotFound(true));
-    window.scrollTo(0, 0);
-  }, [id]);
+  const set = (k) => (e) => setForm({ ...form, [k]: e.target.value });
 
-  if (notFound) {
+  const placeOrder = async (e) => {
+    e.preventDefault();
+    setError("");
+    if (form.address.trim().length < 5) return setError("Please enter a complete delivery address");
+    if (!form.city.trim()) return setError("City is required");
+    const badPhone = validatePhone(form.phone);
+    if (badPhone) return setError(badPhone);
+
+    setBusy(true);
+    try {
+      await apiRequest("/orders", {
+        method: "POST",
+        body: {
+          items: items.map((i) => ({ productId: i.id, qty: i.qty })),
+          shipping: { address: form.address, city: form.city, phone: form.phone },
+        },
+      });
+      clearCart();
+      navigate("/orders", { state: { justOrdered: true } });
+    } catch (err) {
+      setError(err.message);
+      setBusy(false);
+    }
+  };
+
+  if (items.length === 0) {
     return (
       <div className="container page">
-        <h1>Product not found</h1>
-        <Link to="/products">Back to products</Link>
+        <h1>Checkout</h1>
+        <p className="muted">Your cart is empty.</p>
       </div>
     );
   }
 
-  if (!product) return <div className="container page"><p className="muted">Loading...</p></div>;
-
-  const outOfStock = product.stock <= 0;
-
   return (
     <div className="container page">
-      <div style={{ display: "flex", gap: 32, flexWrap: "wrap" }}>
-        <img
-          src={product.image}
-          alt={product.name}
-          style={{ width: 380, maxWidth: "100%", borderRadius: 6, border: "1px solid var(--border)" }}
-        />
-        <div style={{ flex: 1, minWidth: 260 }}>
-          <h1>{product.name}</h1>
-          <p className="muted">
-            {product.category} - {outOfStock ? "out of stock" : `${product.stock} in stock`}
-          </p>
-          <p className="price" style={{ fontSize: 22, margin: "12px 0" }}>
-            Rs {product.price.toLocaleString()}
-          </p>
-          <p style={{ marginBottom: 20 }}>{product.description}</p>
-          <div style={{ display: "flex", gap: 10 }}>
-            <button className="btn" onClick={() => addItem(product)} disabled={outOfStock}>
-              {outOfStock ? "Out of stock" : "Add to cart"}
-            </button>
-            {!outOfStock && (
-              <button
-                className="btn btn-outline"
-                onClick={() => { addItem(product); navigate("/cart"); }}
-              >
-                Buy now
-              </button>
-            )}
+      <h1>Checkout</h1>
+      <div style={{ display: "flex", gap: 32, flexWrap: "wrap", marginTop: 16 }}>
+        <form onSubmit={placeOrder} style={{ flex: 1, minWidth: 280, maxWidth: 440 }}>
+          {error && <div className="error-msg">{error}</div>}
+          <div className="field">
+            <label>Delivery address</label>
+            <input value={form.address} onChange={set("address")} required />
+          </div>
+          <div className="field">
+            <label>City</label>
+            <input value={form.city} onChange={set("city")} required />
+          </div>
+          <div className="field">
+            <label>Phone</label>
+            <input value={form.phone} onChange={set("phone")} required />
+          </div>
+          <div className="field">
+            <label>Payment method</label>
+            <input value="Cash on Delivery" disabled />
+            <p className="muted" style={{ marginTop: 6 }}>
+              Pay in cash when your order arrives at your doorstep.
+            </p>
+          </div>
+          <button className="btn" disabled={busy} style={{ width: "100%" }}>
+            {busy ? "Placing order..." : "Place order"}
+          </button>
+        </form>
+        <div className="cart-summary" style={{ marginTop: 0 }}>
+          <strong>Order summary</strong>
+          {items.map((i) => (
+            <div key={i.id} style={{ display: "flex", justifyContent: "space-between", fontSize: 14, margin: "8px 0" }}>
+              <span>{i.name} x {i.qty}</span>
+              <span>Rs {(i.price * i.qty).toLocaleString()}</span>
+            </div>
+          ))}
+          <hr style={{ border: "none", borderTop: "1px solid var(--border)", margin: "10px 0" }} />
+          <div style={{ display: "flex", justifyContent: "space-between" }}>
+            <span>Total (COD)</span>
+            <strong>Rs {total.toLocaleString()}</strong>
           </div>
         </div>
       </div>
-
-      {similar.length > 0 && (
-        <>
-          <h2 className="section-title">Similar products</h2>
-          <div className="grid">
-            {similar.map((p) => <ProductCard key={p.id} product={p} />)}
-          </div>
-        </>
-      )}
     </div>
   );
 }

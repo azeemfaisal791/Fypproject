@@ -1,9 +1,9 @@
 import { useEffect, useState } from "react";
 import { apiRequest } from "../../api";
 
-const statuses = ["Pending", "Processing", "Shipped", "Delivered", "Cancelled"];
+const statuses = ["Processing", "Shipped", "Delivered", "Cancelled"];
 
-// Order management (Vision 5.7) — live data from /api/orders.
+// Order management (Vision 5.7) — live data, COD payment model.
 export default function AdminOrders() {
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -20,8 +20,8 @@ export default function AdminOrders() {
 
   const setStatus = async (id, status) => {
     try {
-      await apiRequest(`/orders/${id}/status`, { method: "PATCH", body: { status } });
-      setOrders((prev) => prev.map((o) => (o.id === id ? { ...o, status } : o)));
+      const d = await apiRequest(`/orders/${id}/status`, { method: "PATCH", body: { status } });
+      setOrders((prev) => prev.map((o) => (o.id === id ? { ...o, ...d.order } : o)));
     } catch (e) {
       alert(e.message);
     }
@@ -32,7 +32,10 @@ export default function AdminOrders() {
   return (
     <div>
       <h1>Orders</h1>
-      <p className="muted" style={{ marginBottom: 14 }}>Live orders from the database.</p>
+      <p className="muted" style={{ marginBottom: 14 }}>
+        All payments are Cash on Delivery — marking an order "Delivered" records it as paid.
+        Cancelling an order returns its stock to inventory.
+      </p>
       {error && <div className="error-msg">{error}</div>}
       {orders.length === 0 ? (
         <p className="muted">No orders yet.</p>
@@ -55,7 +58,7 @@ export default function AdminOrders() {
                   </td>
                   <td>{o.items.map((i) => `${i.name} x${i.qty}`).join(", ")}</td>
                   <td>Rs {o.totalPrice.toLocaleString()}</td>
-                  <td>{o.isPaid ? "Paid (card)" : o.paymentMethod === "cod" ? "COD" : "Unpaid"}</td>
+                  <td>{o.isPaid ? "Paid (COD)" : "COD - due on delivery"}</td>
                   <td>
                     <select value={o.status} onChange={(e) => setStatus(o.id, e.target.value)}>
                       {statuses.map((s) => <option key={s}>{s}</option>)}
