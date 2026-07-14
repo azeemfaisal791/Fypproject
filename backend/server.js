@@ -10,6 +10,7 @@ mongoose.set("toJSON", { virtuals: true });
 
 const authRoutes = require("./routes/authRoutes");
 const productRoutes = require("./routes/productRoutes");
+const reviewRoutes = require("./routes/reviewRoutes");
 const orderRoutes = require("./routes/orderRoutes");
 const chatRoutes = require("./routes/chatRoutes");
 const recommendationRoutes = require("./routes/recommendationRoutes");
@@ -24,6 +25,7 @@ app.use(express.json());
 // Routes
 app.use("/api/auth", authRoutes);
 app.use("/api/products", productRoutes);
+app.use("/api/products", reviewRoutes); // /:id/reviews (Vision 5.12)
 app.use("/api/orders", orderRoutes);
 app.use("/api/chat", chatRoutes);
 app.use("/api/recommendations", recommendationRoutes);
