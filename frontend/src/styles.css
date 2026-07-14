@@ -172,7 +172,8 @@ th { background: var(--bg-soft); font-weight: 600; font-size: 13px; }
 /* Cart */
 .cart-row { display: flex; gap: 14px; align-items: center; padding: 14px 0; border-bottom: 1px solid var(--border); }
 .cart-row img { width: 72px; height: 56px; object-fit: cover; border-radius: 4px; }
-.cart-row .grow { flex: 1; }
+.cart-row .grow { flex: 1; min-width: 120px; }
+.cart-row-price { width: 110px; text-align: right; flex-shrink: 0; }
 .qty-controls { display: flex; align-items: center; gap: 8px; }
 .qty-controls button {
   width: 26px; height: 26px; border: 1px solid var(--border);
@@ -197,4 +198,34 @@ th { background: var(--bg-soft); font-weight: 600; font-size: 13px; }
   .admin-layout { flex-direction: column; }
   .admin-sidebar { width: 100%; display: flex; overflow-x: auto; padding: 0; }
   .admin-sidebar a { white-space: nowrap; }
+  .admin-content { padding: 18px 16px; }
+
+  /* Navbar: same "scroll instead of overflow" technique as the admin
+     sidebar above, so Products / Cart / Orders / profile / logout never
+     get clipped or force the whole page to scroll sideways. */
+  .navbar-inner { gap: 10px; }
+  .nav-links {
+    gap: 12px; overflow-x: auto; white-space: nowrap;
+    -ms-overflow-style: none; scrollbar-width: none; /* hide the scrollbar, keep the scroll */
+  }
+  .nav-links::-webkit-scrollbar { display: none; }
+
+  /* Cart rows: the desktop single-line layout (image, name, qty, price,
+     remove) doesn't fit a phone width — wrap it onto two lines instead of
+     squeezing every column, and let price/remove sit together on line two. */
+  .cart-row { flex-wrap: wrap; }
+  .cart-row .grow { flex-basis: 100%; order: 1; }
+  .cart-row img { order: 0; }
+  .qty-controls { order: 2; }
+  .cart-row-price { order: 3; width: auto; margin-left: auto; }
+  .cart-row .btn { order: 4; }
+
+  /* Chatbot: fixed 320px width panel is too wide (or edge-to-edge) on
+     narrow phones — go full-width with small side margins instead. */
+  .chatbot-panel {
+    left: 12px; right: 12px; width: auto; bottom: 76px; height: 60vh;
+  }
+  .chatbot-fab { right: 16px; bottom: 16px; }
+
+  .hero h1 { font-size: 24px; }
 }

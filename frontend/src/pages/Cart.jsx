@@ -86,7 +86,7 @@ export default function Cart() {
                 +
               </button>
             </div>
-            <strong style={{ width: 110, textAlign: "right" }}>
+            <strong className="cart-row-price">
               Rs {(i.price * i.qty).toLocaleString()}
             </strong>
             <button className="btn btn-sm btn-outline" onClick={() => removeItem(i.id)}>
