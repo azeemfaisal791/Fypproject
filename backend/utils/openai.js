@@ -4,15 +4,18 @@
 //   Groq:    OPENAI_BASE_URL=https://api.groq.com/openai/v1
 //            OPENAI_MODEL=llama-3.3-70b-versatile
 //            OPENAI_VISION_MODEL=meta-llama/llama-4-scout-17b-16e-instruct
+//            OPENAI_STT_MODEL=whisper-large-v3-turbo
 //
-// Requires Node 18+ (global fetch).
+// Requires Node 18+ (global fetch/FormData/Blob).
 const BASE_URL = (process.env.OPENAI_BASE_URL || "https://api.openai.com/v1").replace(/\/$/, "");
 const MODEL = process.env.OPENAI_MODEL || "gpt-4o-mini";
 // Vision model for image search (Vision 5.3). llama-3.3-70b is text-only,
 // so image requests go to a separate multimodal model on the same provider.
 const VISION_MODEL = process.env.OPENAI_VISION_MODEL || "meta-llama/llama-4-scout-17b-16e-instruct";
+// Speech-to-text model for voice search (Vision 5.4).
+const STT_MODEL = process.env.OPENAI_STT_MODEL || "whisper-large-v3-turbo";
 
-// Shared request/error handling for both text and vision calls
+// Shared request/error handling for text and vision chat calls
 async function callProvider(body) {
   if (!process.env.OPENAI_API_KEY) {
     console.error("[AI] OPENAI_API_KEY is missing from .env (restart the server after adding it)");
@@ -87,4 +90,46 @@ async function visionCompletion(prompt, imageBase64, mimeType = "image/jpeg", { 
   });
 }
 
-module.exports = { chatCompletion, visionCompletion };
+// Speech-to-text (voice search, Vision 5.4) via Whisper on the same provider.
+// Groq hosts whisper-large-v3-turbo at /audio/transcriptions (OpenAI-compatible).
+async function transcribeAudio(buffer, filename = "audio.webm", mimeType = "audio/webm") {
+  if (!process.env.OPENAI_API_KEY) {
+    const err = new Error("AI is not configured yet (missing OPENAI_API_KEY)");
+    err.status = 503;
+    throw err;
+  }
+
+  const fd = new FormData();
+  fd.append("file", new Blob([buffer], { type: mimeType }), filename);
+  fd.append("model", STT_MODEL);
+  fd.append("response_format", "json");
+
+  let res, data;
+  try {
+    // NOTE: no Content-Type header — fetch sets the multipart boundary itself
+    res = await fetch(`${BASE_URL}/audio/transcriptions`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY.trim()}` },
+      body: fd,
+    });
+    data = await res.json();
+  } catch (networkErr) {
+    console.error(`[AI] Network error reaching ${BASE_URL}:`, networkErr.message);
+    const err = new Error("Could not reach the AI service");
+    err.status = 502;
+    throw err;
+  }
+
+  if (!res.ok) {
+    console.error(`[AI] Transcription failed — HTTP ${res.status} | model: ${STT_MODEL} | ${data.error?.message}`);
+    if (data.error?.code === "model_not_found" || res.status === 404)
+      console.error(`[AI] FIX: Model "${STT_MODEL}" not available — check OPENAI_STT_MODEL in .env.`);
+    const err = new Error(data.error?.message || "Transcription failed");
+    err.status = res.status === 429 ? 429 : 502;
+    throw err;
+  }
+
+  return (data.text || "").trim();
+}
+
+module.exports = { chatCompletion, visionCompletion, transcribeAudio };

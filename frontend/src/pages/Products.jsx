@@ -65,6 +65,7 @@ export default function Products() {
       setVisual({
         products: data.products || [],
         analysis: data.analysis,
+        engine: data.engine,
         message: data.message,
         preview,
       });
@@ -120,12 +121,18 @@ export default function Products() {
           />
           <div style={{ flex: 1, minWidth: 200 }}>
             <strong style={{ fontSize: 14 }}>Results for your image</strong>
-            {visual.analysis && (
+            {visual.analysis ? (
               <div className="muted">
                 Detected: {visual.analysis.category}
                 {visual.analysis.keywords?.length > 0 && <> — {visual.analysis.keywords.join(", ")}</>}
               </div>
-            )}
+            ) : visual.products.length > 0 ? (
+              <div className="muted">
+                Ranked by visual similarity
+                {typeof visual.products[0]?.similarity === "number" &&
+                  <> — best match {Math.round(visual.products[0].similarity * 100)}%</>}
+              </div>
+            ) : null}
           </div>
           <button className="icon-btn" onClick={clearVisual} title="Back to all products">
             ✕ Clear
