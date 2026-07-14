@@ -4,10 +4,6 @@ const mongoose = require("mongoose");
 const cors = require("cors");
 const helmet = require("helmet");
 const rateLimit = require("express-rate-limit");
-
-// GLOBAL: every schema serializes with virtuals, so all API responses
-// include a string `id` alongside `_id`. The frontend relies on `id` —
-// without this, product/order links break (/products/undefined).
 mongoose.set("toJSON", { virtuals: true });
 
 const authRoutes = require("./routes/authRoutes");
