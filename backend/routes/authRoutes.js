@@ -1,5 +1,6 @@
 const express = require("express");
 const jwt = require("jsonwebtoken");
+const rateLimit = require("express-rate-limit");
 const User = require("../models/User");
 const { protect, adminOnly } = require("../middleware/auth");
 const { validateName, validateEmail, validatePassword, validateOtp } = require("../utils/validators");
@@ -7,6 +8,19 @@ const { issueOtp, verifyOtp } = require("../utils/otp");
 const { sendOtpEmail } = require("../utils/mailer");
 
 const router = express.Router();
+
+// Stricter limit for the classic brute-force / credential-stuffing / OTP-
+// guessing targets. This is IP-based and sits alongside (not instead of)
+// otp.js's own per-account cooldown + max-attempts checks — the two overlap
+// on purpose: this one blunts an attacker hitting many accounts from one IP,
+// otp.js blunts one account being guessed from many IPs.
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { message: "Too many attempts. Please wait a few minutes and try again." },
+});
 
 const signToken = (user) =>
   jwt.sign({ id: user._id, role: user.role }, process.env.JWT_SECRET, {
@@ -26,7 +40,7 @@ const findWithOtp = (email) =>
 
 // ---------------- Registration ----------------
 // POST /api/auth/register (public - always creates CUSTOMER; admins are seeded)
-router.post("/register", async (req, res) => {
+router.post("/register", authLimiter, async (req, res) => {
   try {
     const { name, email, password } = req.body;
     const invalid = validateName(name) || validateEmail(email) || validatePassword(password);
@@ -53,7 +67,7 @@ router.post("/register", async (req, res) => {
 // POST /api/auth/login
 // If the account has 2FA enabled, this sends an OTP and returns
 // { requiresOtp: true } instead of a token.
-router.post("/login", async (req, res) => {
+router.post("/login", authLimiter, async (req, res) => {
   try {
     const { email, password } = req.body;
     if (validateEmail(email) || !password) {
@@ -86,7 +100,7 @@ router.post("/login", async (req, res) => {
 
 // ---------------- Login (step 2: verify 2FA OTP) ----------------
 // POST /api/auth/login/verify-otp  { email, otp }
-router.post("/login/verify-otp", async (req, res) => {
+router.post("/login/verify-otp", authLimiter, async (req, res) => {
   try {
     const { email, otp } = req.body;
     const invalid = validateEmail(email) || validateOtp(otp);
@@ -106,7 +120,7 @@ router.post("/login/verify-otp", async (req, res) => {
 
 // ---------------- Forgot password (step 1: request OTP) ----------------
 // POST /api/auth/forgot-password  { email }
-router.post("/forgot-password", async (req, res) => {
+router.post("/forgot-password", authLimiter, async (req, res) => {
   try {
     const { email } = req.body;
     const invalid = validateEmail(email);
@@ -127,7 +141,7 @@ router.post("/forgot-password", async (req, res) => {
 
 // ---------------- Forgot password (step 2: verify OTP + set new password) ----------------
 // POST /api/auth/reset-password  { email, otp, password }
-router.post("/reset-password", async (req, res) => {
+router.post("/reset-password", authLimiter, async (req, res) => {
   try {
     const { email, otp, password } = req.body;
     const invalid = validateEmail(email) || validateOtp(otp) || validatePassword(password);

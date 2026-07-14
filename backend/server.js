@@ -2,6 +2,8 @@ require("dotenv").config();
 const express = require("express");
 const mongoose = require("mongoose");
 const cors = require("cors");
+const helmet = require("helmet");
+const rateLimit = require("express-rate-limit");
 
 // GLOBAL: every schema serializes with virtuals, so all API responses
 // include a string `id` alongside `_id`. The frontend relies on `id` —
@@ -19,8 +21,45 @@ const voiceSearchRoutes = require("./routes/voiceSearchRoutes");
 
 const app = express();
 
-app.use(cors());
+// Security headers (Vision 7.5 / 9.1). Safe default here: this app is a pure
+// JSON API — the frontend HTML is served separately by Vite/its own static
+// host, so helmet's headers on API responses don't affect how that page loads.
+app.use(helmet());
+
+// CORS: only the configured frontend origin(s) may call this API from a
+// browser. FRONTEND_URL supports a comma-separated list (e.g. local +
+// deployed) so this doesn't need code changes between dev and production.
+// Requests with no Origin header (curl, Postman, server-to-server) are still
+// allowed — CORS only ever restricts browser-initiated cross-origin calls.
+const allowedOrigins = (process.env.FRONTEND_URL || "http://localhost:5173")
+  .split(",")
+  .map((o) => o.trim())
+  .filter(Boolean);
+app.use(
+  cors({
+    origin: (origin, callback) => {
+      if (!origin || allowedOrigins.includes(origin)) return callback(null, true);
+      callback(new Error("Not allowed by CORS"));
+    },
+  })
+);
+
 app.use(express.json());
+
+// General API rate limit — generous enough not to interfere with normal
+// browsing/searching, just there to blunt scraping and denial-of-service
+// style abuse. Tighter, endpoint-specific limits (login, OTP, etc.) live in
+// authRoutes.js next to the routes they protect.
+app.use(
+  "/api",
+  rateLimit({
+    windowMs: 15 * 60 * 1000, // 15 minutes
+    max: 300,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { message: "Too many requests. Please try again in a few minutes." },
+  })
+);
 
 // Routes
 app.use("/api/auth", authRoutes);
@@ -34,6 +73,15 @@ app.use("/api/search", voiceSearchRoutes); // Voice Search (Vision 5.4)
 
 app.get("/api/health", (req, res) => {
   res.json({ status: "ok", message: "AI E-Commerce backend running" });
+});
+
+// Clean JSON response for a rejected CORS origin (instead of Express's
+// default HTML error page). Must be defined after the routes above.
+app.use((err, req, res, next) => {
+  if (err && err.message === "Not allowed by CORS") {
+    return res.status(403).json({ message: "This origin is not allowed to access the API" });
+  }
+  next(err);
 });
 
 const PORT = process.env.PORT || 5000;
