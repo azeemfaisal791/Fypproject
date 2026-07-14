@@ -24,11 +24,14 @@ export function CartProvider({ children }) {
     setItems((prev) => {
       const found = prev.find((i) => i.id === product.id);
       if (found) {
+        // Clamp to available stock so the cart can't exceed what's in stock
+        const max = typeof found.stock === "number" ? found.stock : Infinity;
         return prev.map((i) =>
-          i.id === product.id ? { ...i, qty: i.qty + qty } : i
+          i.id === product.id ? { ...i, qty: Math.min(i.qty + qty, max) } : i
         );
       }
-      return [...prev, { ...product, qty }];
+      const max = typeof product.stock === "number" ? product.stock : Infinity;
+      return [...prev, { ...product, qty: Math.min(qty, max) }];
     });
   };
 

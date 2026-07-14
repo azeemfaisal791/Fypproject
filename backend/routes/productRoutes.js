@@ -2,6 +2,7 @@ const express = require("express");
 const mongoose = require("mongoose");
 const Product = require("../models/Product");
 const { protect, adminOnly, optionalAuth } = require("../middleware/auth");
+const cnn = require("../utils/imageEmbedding");
 
 const router = express.Router();
 
@@ -110,6 +111,13 @@ router.post("/", protect, adminOnly, async (req, res) => {
       stock: Number(stock) || 0,
       createdBy: req.user._id,
     });
+    // Index the image for CNN visual search so new products are searchable
+    // (fire-and-forget; skipped when the TensorFlow runtime isn't installed).
+    if (cnn.isAvailable()) {
+      cnn.embedProductImage(product).catch((e) =>
+        console.error("[products] embedding failed:", e.message)
+      );
+    }
     res.status(201).json(product);
   } catch (err) {
     res.status(400).json({ message: "Failed to create product" });
@@ -136,6 +144,13 @@ router.put("/:id", protect, adminOnly, async (req, res) => {
       { new: true, runValidators: true }
     );
     if (!product) return res.status(404).json({ message: "Product not found" });
+    // Re-index only when the image actually changed, so the CNN visual-search
+    // vector stays in sync (fire-and-forget; skipped if TensorFlow is absent).
+    if (image !== undefined && cnn.isAvailable()) {
+      cnn.embedProductImage(product).catch((e) =>
+        console.error("[products] embedding failed:", e.message)
+      );
+    }
     res.json(product);
   } catch {
     res.status(400).json({ message: "Failed to update product" });

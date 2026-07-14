@@ -4,6 +4,7 @@ const Order = require("../models/Order");
 const Product = require("../models/Product");
 const { protect, adminOnly } = require("../middleware/auth");
 const { validatePhone } = require("../utils/validators");
+const { sendOrderConfirmationEmail, sendOrderStatusEmail } = require("../utils/mailer");
 
 const router = express.Router();
 
@@ -53,18 +54,46 @@ router.post("/", protect, async (req, res) => {
       itemsPrice += product.price * qty;
     }
 
-    const order = await Order.create({
-      user: req.user._id,
-      items: orderItems,
-      shipping: { address: shipping.address.trim(), city: shipping.city.trim(), phone: shipping.phone.trim() },
-      itemsPrice,
-      totalPrice: itemsPrice,
-    });
-
-    // Reserve stock immediately
-    for (const item of order.items) {
-      await Product.findByIdAndUpdate(item.product, { $inc: { stock: -item.qty } });
+    // Reserve stock atomically so two concurrent orders can't oversell the
+    // same unit. The conditional decrement only succeeds while enough stock
+    // remains; if any item can't be reserved we roll back the rest and stop.
+    const reserved = [];
+    for (const item of orderItems) {
+      const updated = await Product.findOneAndUpdate(
+        { _id: item.product, isActive: true, stock: { $gte: item.qty } },
+        { $inc: { stock: -item.qty } }
+      );
+      if (!updated) {
+        for (const r of reserved) {
+          await Product.findByIdAndUpdate(r.product, { $inc: { stock: r.qty } });
+        }
+        const current = await Product.findById(item.product).select("stock");
+        return res.status(400).json({ message: `Only ${current ? current.stock : 0} left of "${item.name}"` });
+      }
+      reserved.push(item);
     }
+
+    let order;
+    try {
+      order = await Order.create({
+        user: req.user._id,
+        items: orderItems,
+        shipping: { address: shipping.address.trim(), city: shipping.city.trim(), phone: shipping.phone.trim() },
+        itemsPrice,
+        totalPrice: itemsPrice,
+      });
+    } catch (createErr) {
+      // Order failed to persist — release the stock we just reserved
+      for (const r of reserved) {
+        await Product.findByIdAndUpdate(r.product, { $inc: { stock: r.qty } });
+      }
+      throw createErr;
+    }
+
+    // Order confirmation email (fire-and-forget — email issues never fail the order)
+    sendOrderConfirmationEmail(req.user, order).catch((e) =>
+      console.error("[orders] confirmation email failed:", e.message)
+    );
 
     res.status(201).json({ order });
   } catch (err) {
@@ -107,8 +136,24 @@ router.patch("/:id/status", protect, adminOnly, async (req, res) => {
         await Product.findByIdAndUpdate(item.product, { $inc: { stock: item.qty } });
       }
     }
+    // Re-opening a previously cancelled order re-reserves its stock
+    else if (previous === "Cancelled" && status !== "Cancelled") {
+      for (const item of order.items) {
+        await Product.findByIdAndUpdate(item.product, { $inc: { stock: -item.qty } });
+      }
+    }
 
     await order.save();
+    // Populate the customer so the response matches GET /api/orders (keeps the
+    // admin table's name/email columns intact) and gives the email a recipient.
+    await order.populate("user", "name email");
+
+    // Notify the customer of the new status (no-op for statuses without a
+    // template). Fire-and-forget — email issues never fail the update.
+    sendOrderStatusEmail(order.user, order).catch((e) =>
+      console.error("[orders] status email failed:", e.message)
+    );
+
     res.json({ order });
   } catch {
     res.status(400).json({ message: "Invalid status" });
