@@ -37,8 +37,11 @@ const upload = multer({
   },
 });
 
-// Minimum cosine similarity to count as a match (tune with your test set)
-const SIM_THRESHOLD = parseFloat(process.env.VISUAL_SIM_THRESHOLD || "0.5");
+// Minimum cosine similarity to count as a match (tune with your test set).
+// MobileNet embeddings of genuinely-similar fashion photos typically score
+// ~0.4-0.65, so 0.5 discarded real matches; 0.35 keeps them. Override with
+// VISUAL_SIM_THRESHOLD in .env.
+const SIM_THRESHOLD = parseFloat(process.env.VISUAL_SIM_THRESHOLD || "0.35");
 const LIMIT = 12;
 const MAX_ENCODED_BYTES = 3 * 1024 * 1024; // provider base64 limit (VLM engine)
 
@@ -174,10 +177,13 @@ router.post("/visual", (req, res) => {
       const { buffer, base64, mimeType } = await prepareImage(req.file);
       const engine = String(req.query.engine || "auto").toLowerCase();
 
-      // CNN first (unless explicitly asked for the VLM)
+      // CNN first (unless explicitly asked for the VLM). Embed the ORIGINAL
+      // upload bytes — not the VLM-optimized (resized + re-compressed) buffer —
+      // so the query is preprocessed identically to how product images were
+      // indexed in embedProducts.js. The CNN resizes to 224x224 internally.
       if (engine !== "vlm" && cnn.isAvailable()) {
         try {
-          return res.json(await cnnSearch(buffer));
+          return res.json(await cnnSearch(req.file.buffer));
         } catch (cnnErr) {
           if (engine === "cnn") {
             // Explicitly requested CNN -> report honestly instead of switching

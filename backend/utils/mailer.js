@@ -40,7 +40,20 @@ async function sendOtpEmail(to, otp, purpose) {
 const orderRef = (order) => `#${String(order._id).slice(-6).toUpperCase()}`;
 
 const itemsList = (items) =>
-  items.map((i) => `  - ${i.name} x${i.qty} = Rs ${(i.price * i.qty).toLocaleString()}`).join("\n");
+  items
+    .map(
+      (i) =>
+        `  - ${i.name}${i.size ? ` (Size: ${i.size})` : ""} x${i.qty} = Rs ${(i.price * i.qty).toLocaleString()}`
+    )
+    .join("\n");
+
+// How the payment appears in emails, based on the order's method/paid state.
+const paymentLabel = (order) =>
+  order.paymentMethod === "card"
+    ? order.isPaid
+      ? "Paid by card"
+      : "Card payment pending"
+    : "Cash on Delivery";
 
 async function sendOrderConfirmationEmail(user, order) {
   const subject = `Order confirmed - ${orderRef(order)}`;
@@ -51,7 +64,7 @@ Thanks for your order! Here's your summary:
 Order ${orderRef(order)}
 ${itemsList(order.items)}
 
-Total: Rs ${order.totalPrice.toLocaleString()} (Cash on Delivery)
+Total: Rs ${order.totalPrice.toLocaleString()} (${paymentLabel(order)})
 Delivering to: ${order.shipping.address}, ${order.shipping.city}
 
 We'll email you again when your order ships. You can also track it any time from "My Orders" on the site.
@@ -60,11 +73,12 @@ Thanks for shopping with SmartShop!`;
   await sendMail(user.email, subject, text);
 }
 
-// Only these statuses are worth emailing about — "Processing" is covered by
-// the confirmation email above.
+// Only these statuses are worth emailing about — the initial "Pending" state
+// is already covered by the order confirmation email above.
 const STATUS_NOTE = {
   Shipped: "Your order is on its way!",
   Delivered: "Your order has been delivered. We hope you enjoy it!",
+  Closed: "Your order is now complete. Thanks for shopping with us!",
   Cancelled: "Your order has been cancelled. If you didn't request this, please contact us.",
 };
 
@@ -79,7 +93,7 @@ ${note}
 Order ${orderRef(order)}
 ${itemsList(order.items)}
 
-Total: Rs ${order.totalPrice.toLocaleString()} (Cash on Delivery)
+Total: Rs ${order.totalPrice.toLocaleString()} (${paymentLabel(order)})
 
 Thanks for shopping with SmartShop!`;
   await sendMail(user.email, subject, text);

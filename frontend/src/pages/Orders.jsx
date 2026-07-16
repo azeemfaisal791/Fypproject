@@ -3,7 +3,11 @@ import { useLocation } from "react-router-dom";
 import { apiRequest } from "../api";
 
 const pillClass = (status) =>
-  status === "Delivered" ? "green" : status === "Cancelled" ? "red" : "gray";
+  status === "Delivered" || status === "Closed"
+    ? "green"
+    : status === "Cancelled"
+    ? "red"
+    : "gray";
 
 export default function Orders() {
   const location = useLocation();
@@ -11,7 +15,9 @@ export default function Orders() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const notice = location.state?.justOrdered
-    ? "Order placed successfully! You'll pay in cash on delivery."
+    ? location.state?.paid
+      ? "Payment successful! Your order is confirmed."
+      : "Order placed successfully! You'll pay in cash on delivery."
     : "";
 
   useEffect(() => {
@@ -41,9 +47,17 @@ export default function Orders() {
                 <tr key={o.id}>
                   <td title={o.id}>#{o.id.slice(-6).toUpperCase()}</td>
                   <td>{new Date(o.createdAt).toLocaleDateString()}</td>
-                  <td>{o.items.map((i) => `${i.name} x${i.qty}`).join(", ")}</td>
+                  <td>{o.items.map((i) => `${i.name}${i.size ? ` (${i.size})` : ""} x${i.qty}`).join(", ")}</td>
                   <td>Rs {o.totalPrice.toLocaleString()}</td>
-                  <td>{o.isPaid ? "Paid" : "Cash on delivery"}</td>
+                  <td>
+                    {o.isPaid
+                      ? o.paymentMethod === "card"
+                        ? "Paid (Card)"
+                        : "Paid"
+                      : o.paymentMethod === "card"
+                      ? "Card - payment pending"
+                      : "Cash on delivery"}
+                  </td>
                   <td><span className={`pill ${pillClass(o.status)}`}>{o.status}</span></td>
                 </tr>
               ))}

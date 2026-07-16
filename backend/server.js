@@ -14,6 +14,7 @@ const chatRoutes = require("./routes/chatRoutes");
 const recommendationRoutes = require("./routes/recommendationRoutes");
 const visualSearchRoutes = require("./routes/visualSearchRoutes");
 const voiceSearchRoutes = require("./routes/voiceSearchRoutes");
+const { router: paymentRoutes, webhookHandler } = require("./routes/paymentRoutes");
 
 const app = express();
 
@@ -40,6 +41,10 @@ app.use(
   })
 );
 
+// Stripe webhook MUST receive the raw request body (signature verification
+// needs the exact bytes), so it's registered before express.json() parses it.
+app.post("/api/payments/webhook", express.raw({ type: "application/json" }), webhookHandler);
+
 app.use(express.json());
 
 // General API rate limit — generous enough not to interfere with normal
@@ -62,6 +67,7 @@ app.use("/api/auth", authRoutes);
 app.use("/api/products", productRoutes);
 app.use("/api/products", reviewRoutes); // /:id/reviews (Vision 5.12)
 app.use("/api/orders", orderRoutes);
+app.use("/api/payments", paymentRoutes); // Stripe card payments (Vision 7.5)
 app.use("/api/chat", chatRoutes);
 app.use("/api/recommendations", recommendationRoutes);
 app.use("/api/search", visualSearchRoutes); // Visual Search (Vision 5.3)

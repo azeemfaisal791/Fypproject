@@ -67,20 +67,21 @@ export default function Cart() {
       {notice && <div className="error-msg" style={{ marginTop: 10 }}>{notice}</div>}
       <div style={{ marginTop: 16 }}>
         {items.map((i) => (
-          <div className="cart-row" key={i.id}>
+          <div className="cart-row" key={i.key}>
             <img src={i.image} alt={i.name} />
             <div className="grow">
               <strong>{i.name}</strong>
+              {i.size && <div className="muted">Size: {i.size}</div>}
               <div className="muted">
                 Rs {i.price.toLocaleString()} each
                 {i.stock <= 10 && <span> - only {i.stock} left</span>}
               </div>
             </div>
             <div className="qty-controls">
-              <button onClick={() => updateQty(i.id, i.qty - 1)}>-</button>
+              <button onClick={() => updateQty(i.key, i.qty - 1)}>-</button>
               <span>{i.qty}</span>
               <button
-                onClick={() => updateQty(i.id, Math.min(i.qty + 1, i.stock))}
+                onClick={() => updateQty(i.key, Math.min(i.qty + 1, i.stock))}
                 disabled={i.qty >= i.stock}
               >
                 +
@@ -89,7 +90,7 @@ export default function Cart() {
             <strong className="cart-row-price">
               Rs {(i.price * i.qty).toLocaleString()}
             </strong>
-            <button className="btn btn-sm btn-outline" onClick={() => removeItem(i.id)}>
+            <button className="btn btn-sm btn-outline" onClick={() => removeItem(i.key)}>
               Remove
             </button>
           </div>

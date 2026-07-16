@@ -20,6 +20,9 @@
 // isAvailable() returns false and the visual search route automatically
 // falls back to the vision-LLM engine.
 
+const fs = require("fs");
+const path = require("path");
+
 let tf = null;
 let usingNative = false;
 let model = null;
@@ -117,8 +120,10 @@ async function bufferToTensor(buffer) {
   return tf.tensor3d(new Uint8Array(data), [info.height, info.width, 3], "int32");
 }
 
-// image buffer -> L2-normalized embedding vector
-async function embedImage(buffer) {
+// image buffer -> L2-normalized FROZEN MobileNet features (1280-d). This is the
+// "feature extraction" style of transfer learning: the pretrained base is used
+// as-is. trainVisualModel.js consumes these to train the fine-tuned head.
+async function frozenFeatures(buffer) {
   const m = await loadModel();
   let input, activation;
   try {
@@ -132,6 +137,58 @@ async function embedImage(buffer) {
     input && input.dispose();
     activation && activation.dispose();
   }
+}
+
+// ------------------------------------------------------- fine-tuned head
+// The "fine-tuning" style of transfer learning. trainVisualModel.js freezes
+// MobileNet and trains a small head (1280 -> EMB -> categories) on the product
+// catalog; its hidden layer is a fashion-AWARE embedding that clusters by
+// garment type far better than the raw ImageNet features. If the head hasn't
+// been trained yet, embedImage() transparently falls back to frozen features.
+let head = null; // { inDim, outDim, W1:Float32Array, b1:Float32Array, categories }
+let headTried = false;
+
+function loadHead() {
+  if (headTried) return head;
+  headTried = true;
+  try {
+    const j = JSON.parse(
+      fs.readFileSync(path.join(__dirname, "..", "model", "visual-head.json"), "utf8")
+    );
+    head = {
+      inDim: j.inDim,
+      outDim: j.outDim,
+      W1: Float32Array.from(j.W1), // row-major [inDim][outDim]
+      b1: Float32Array.from(j.b1),
+      categories: j.categories,
+    };
+    console.log(
+      `[cnn] Fine-tuned head loaded (${j.inDim}->${j.outDim}, ${j.categories.length} classes) — using learned embedding.`
+    );
+  } catch {
+    head = null; // not trained yet -> frozen-feature fallback
+  }
+  return head;
+}
+
+// frozen features -> learned embedding:  L2normalize( ReLU(features · W1 + b1) )
+function projectHead(features) {
+  const { W1, b1, inDim, outDim } = head;
+  const out = new Array(outDim);
+  for (let j = 0; j < outDim; j++) {
+    let s = b1[j];
+    for (let i = 0; i < inDim; i++) s += features[i] * W1[i * outDim + j];
+    out[j] = s > 0 ? s : 0; // ReLU
+  }
+  return l2normalize(out);
+}
+
+// image buffer -> L2-normalized embedding used for similarity search. Uses the
+// fine-tuned head when available, otherwise the frozen features.
+async function embedImage(buffer) {
+  const features = await frozenFeatures(buffer);
+  const h = loadHead();
+  return h ? projectHead(features) : features;
 }
 
 function l2normalize(vec) {
@@ -166,4 +223,4 @@ async function embedProductImage(product) {
   }
 }
 
-module.exports = { isAvailable, embedImage, cosineSimilarity, embedProductImage };
+module.exports = { isAvailable, embedImage, frozenFeatures, cosineSimilarity, embedProductImage };

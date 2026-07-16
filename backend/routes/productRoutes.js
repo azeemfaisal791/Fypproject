@@ -2,16 +2,40 @@ const express = require("express");
 const mongoose = require("mongoose");
 const Product = require("../models/Product");
 const { protect, adminOnly, optionalAuth } = require("../middleware/auth");
+const { PRODUCT_SIZES } = require("../utils/constants");
 const cnn = require("../utils/imageEmbedding");
 
 const router = express.Router();
+
+// Normalize a client-supplied `sizes` array into clean [{ size, stock }] entries
+// (valid sizes only, one entry per size, non-negative integer stock). Returns
+// { sizes, stock } where stock is the total, or { error } if invalid.
+const normalizeSizes = (input) => {
+  if (!Array.isArray(input) || input.length === 0) {
+    return { error: "Select at least one size and its stock" };
+  }
+  const seen = new Set();
+  const sizes = [];
+  for (const entry of input) {
+    const size = String(entry?.size || "").trim().toUpperCase();
+    if (!PRODUCT_SIZES.includes(size)) return { error: `Invalid size "${entry?.size}"` };
+    if (seen.has(size)) return { error: `Duplicate size "${size}"` };
+    seen.add(size);
+    const stock = Number(entry?.stock);
+    if (!Number.isInteger(stock) || stock < 0) return { error: `Stock for ${size} must be a whole number ≥ 0` };
+    sizes.push({ size, stock });
+  }
+  // Keep them in the canonical display order (S, M, L, XL).
+  sizes.sort((a, b) => PRODUCT_SIZES.indexOf(a.size) - PRODUCT_SIZES.indexOf(b.size));
+  const stock = sizes.reduce((sum, s) => sum + s.stock, 0);
+  return { sizes, stock };
+};
 
 const validateProduct = (b) => {
   if (!b.name || !String(b.name).trim()) return "Product name is required";
   if (!b.description || !String(b.description).trim()) return "Description is required";
   if (!b.category || !String(b.category).trim()) return "Category is required";
   if (!b.price || Number(b.price) <= 0) return "Price must be a positive number";
-  if (b.stock !== undefined && Number(b.stock) < 0) return "Stock cannot be negative";
   return null;
 };
 
@@ -101,14 +125,17 @@ router.post("/", protect, adminOnly, async (req, res) => {
   try {
     const invalid = validateProduct(req.body);
     if (invalid) return res.status(400).json({ message: invalid });
-    const { name, description, price, category, image, stock } = req.body;
+    const { sizes, stock, error } = normalizeSizes(req.body.sizes);
+    if (error) return res.status(400).json({ message: error });
+    const { name, description, price, category, image } = req.body;
     const product = await Product.create({
       name: name.trim(),
       description,
       price: Number(price),
       category: category.trim(),
       image: image || `https://loremflickr.com/600/450/menswear?random=${Date.now()}`,
-      stock: Number(stock) || 0,
+      sizes,
+      stock, // total across sizes
       createdBy: req.user._id,
     });
     // Index the image for CNN visual search so new products are searchable
@@ -129,7 +156,9 @@ router.put("/:id", protect, adminOnly, async (req, res) => {
   try {
     const invalid = validateProduct(req.body);
     if (invalid) return res.status(400).json({ message: invalid });
-    const { name, description, price, category, image, stock, isActive } = req.body;
+    const { sizes, stock, error } = normalizeSizes(req.body.sizes);
+    if (error) return res.status(400).json({ message: error });
+    const { name, description, price, category, image, isActive } = req.body;
     const product = await Product.findByIdAndUpdate(
       req.params.id,
       {
@@ -138,7 +167,8 @@ router.put("/:id", protect, adminOnly, async (req, res) => {
         price: Number(price),
         category: category.trim(),
         ...(image !== undefined && { image }),
-        stock: Number(stock) || 0,
+        sizes,
+        stock, // recomputed total across sizes
         ...(isActive !== undefined && { isActive }),
       },
       { new: true, runValidators: true }

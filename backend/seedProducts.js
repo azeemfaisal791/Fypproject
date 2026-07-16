@@ -141,14 +141,22 @@ const catalog = [
     "Sage-green loungewear set in soft brushed cotton. Relaxed top and tapered lounge pants."],
 ];
 
-const products = catalog.map(([name, category, price, image, description]) => ({
-  name,
-  category,
-  price,
-  image,
-  description,
-  stock: rand(8, 50),
-}));
+const { PRODUCT_SIZES } = require("./utils/constants");
+
+const products = catalog.map(([name, category, price, image, description]) => {
+  // Give every product its own stock per size, and set the aggregate `stock`
+  // total to their sum (kept in sync the same way the API does).
+  const sizes = PRODUCT_SIZES.map((size) => ({ size, stock: rand(2, 15) }));
+  return {
+    name,
+    category,
+    price,
+    image,
+    description,
+    sizes,
+    stock: sizes.reduce((sum, s) => sum + s.stock, 0),
+  };
+});
 
 // ---------- optional image liveness check (warn only; never swaps images) ----------
 async function verifyImages() {
@@ -172,7 +180,14 @@ async function verifyImages() {
   console.log(dead === 0 ? "All images reachable." : `${dead} image(s) need attention (see warnings above).`);
 }
 
+// Export the catalog so other scripts (e.g. downloadTestImages.js) can reuse
+// these verified, category-matched image URLs without re-seeding the DB.
+module.exports = { catalog, products };
+
 // ---------- run ----------
+// Only seed when this file is executed directly (`node seedProducts.js`), not
+// when it's require()d by another script.
+if (require.main === module)
 (async () => {
   try {
     await mongoose.connect(process.env.MONGO_URI || "mongodb://127.0.0.1:27017/ai_ecommerce");

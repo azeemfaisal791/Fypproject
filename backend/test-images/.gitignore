@@ -1,0 +1,6 @@
+# Ignore downloaded/added test images, but keep the folder structure & docs.
+*.jpg
+*.jpeg
+*.png
+*.webp
+!.gitkeep

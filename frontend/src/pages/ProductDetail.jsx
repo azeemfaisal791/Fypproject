@@ -14,12 +14,14 @@ export default function ProductDetail() {
   const [similar, setSimilar] = useState([]);
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
+  const [size, setSize] = useState(""); // chosen size (required before adding)
 
   useEffect(() => {
     setLoading(true);
     setNotFound(false);
     setProduct(null);
     setSimilar([]);
+    setSize("");
 
     apiRequest(`/products/${id}`, { auth: false })
       .then((data) => {
@@ -54,7 +56,10 @@ export default function ProductDetail() {
     );
   }
 
+  const sizes = product.sizes || [];
   const outOfStock = product.stock <= 0;
+  const selectedStock = sizes.find((s) => s.size === size)?.stock ?? 0;
+  const canAdd = !outOfStock && !!size && selectedStock > 0;
 
   return (
     <div className="container page">
@@ -73,14 +78,42 @@ export default function ProductDetail() {
             Rs {product.price.toLocaleString()}
           </p>
           <p style={{ marginBottom: 20 }}>{product.description}</p>
+
+          {!outOfStock && (
+            <div style={{ marginBottom: 20 }}>
+              <label className="muted" style={{ display: "block", marginBottom: 8 }}>
+                Select size{size && ` — ${selectedStock} in stock`}
+              </label>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                {sizes.map((s) => {
+                  const soldOut = s.stock <= 0;
+                  const active = s.size === size;
+                  return (
+                    <button
+                      key={s.size}
+                      type="button"
+                      className={`size-btn${active ? " active" : ""}`}
+                      onClick={() => setSize(s.size)}
+                      disabled={soldOut}
+                      title={soldOut ? "Out of stock" : `${s.stock} in stock`}
+                    >
+                      {s.size}
+                    </button>
+                  );
+                })}
+              </div>
+              {!size && <p className="muted" style={{ marginTop: 8, fontSize: 13 }}>Please select a size.</p>}
+            </div>
+          )}
+
           <div style={{ display: "flex", gap: 10 }}>
-            <button className="btn" onClick={() => addItem(product)} disabled={outOfStock}>
+            <button className="btn" onClick={() => addItem(product, 1, size)} disabled={!canAdd}>
               {outOfStock ? "Out of stock" : "Add to cart"}
             </button>
             <button
               className="btn btn-outline"
-              onClick={() => { addItem(product); navigate("/cart"); }}
-              disabled={outOfStock}
+              onClick={() => { addItem(product, 1, size); navigate("/cart"); }}
+              disabled={!canAdd}
             >
               Buy now
             </button>

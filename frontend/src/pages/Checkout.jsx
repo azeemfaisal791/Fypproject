@@ -3,15 +3,23 @@ import { useNavigate } from "react-router-dom";
 import { apiRequest } from "../api";
 import { useCart } from "../context/CartContext.jsx";
 import { validatePhone } from "../validators.js";
+import CardPayment from "../components/CardPayment.jsx";
 
 export default function Checkout() {
   const { items, total, clearCart } = useCart();
   const navigate = useNavigate();
   const [form, setForm] = useState({ address: "", city: "", phone: "" });
+  const [method, setMethod] = useState("cod"); // "cod" | "card"
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  // Once a card order is created we move to the payment step and show the
+  // Stripe Payment Element for that order.
+  const [cardOrderId, setCardOrderId] = useState(null);
 
   const set = (k) => (e) => setForm({ ...form, [k]: e.target.value });
+
+  const goToOrders = (paid) =>
+    navigate("/orders", { state: { justOrdered: true, paid } });
 
   const placeOrder = async (e) => {
     e.preventDefault();
@@ -23,22 +31,30 @@ export default function Checkout() {
 
     setBusy(true);
     try {
-      await apiRequest("/orders", {
+      const { order } = await apiRequest("/orders", {
         method: "POST",
         body: {
-          items: items.map((i) => ({ productId: i.id, qty: i.qty })),
+          items: items.map((i) => ({ productId: i.id, size: i.size, qty: i.qty })),
           shipping: { address: form.address, city: form.city, phone: form.phone },
+          paymentMethod: method,
         },
       });
-      clearCart();
-      navigate("/orders", { state: { justOrdered: true } });
+
+      if (method === "card") {
+        // Order is reserved but unpaid — collect the card next.
+        setCardOrderId(order.id || order._id);
+        setBusy(false);
+      } else {
+        clearCart();
+        goToOrders(false);
+      }
     } catch (err) {
       setError(err.message);
       setBusy(false);
     }
   };
 
-  if (items.length === 0) {
+  if (items.length === 0 && !cardOrderId) {
     return (
       <div className="container page">
         <h1>Checkout</h1>
@@ -51,42 +67,78 @@ export default function Checkout() {
     <div className="container page">
       <h1>Checkout</h1>
       <div style={{ display: "flex", gap: 32, flexWrap: "wrap", marginTop: 16 }}>
-        <form onSubmit={placeOrder} style={{ flex: 1, minWidth: 280, maxWidth: 440 }}>
-          {error && <div className="error-msg">{error}</div>}
-          <div className="field">
-            <label>Delivery address</label>
-            <input value={form.address} onChange={set("address")} required />
-          </div>
-          <div className="field">
-            <label>City</label>
-            <input value={form.city} onChange={set("city")} required />
-          </div>
-          <div className="field">
-            <label>Phone</label>
-            <input value={form.phone} onChange={set("phone")} required />
-          </div>
-          <div className="field">
-            <label>Payment method</label>
-            <input value="Cash on Delivery" disabled />
-            <p className="muted" style={{ marginTop: 6 }}>
-              Pay in cash when your order arrives at your doorstep.
-            </p>
-          </div>
-          <button className="btn" disabled={busy} style={{ width: "100%" }}>
-            {busy ? "Placing order..." : "Place order"}
-          </button>
-        </form>
+        <div style={{ flex: 1, minWidth: 280, maxWidth: 440 }}>
+          {cardOrderId ? (
+            // ---- Payment step (card) ----
+            <>
+              <h3 style={{ marginTop: 0 }}>Pay with card</h3>
+              <p className="muted" style={{ marginBottom: 14 }}>
+                Your order is reserved. Complete the payment below to confirm it.
+              </p>
+              <CardPayment
+                orderId={cardOrderId}
+                total={total}
+                onSuccess={() => {
+                  clearCart();
+                  goToOrders(true);
+                }}
+              />
+            </>
+          ) : (
+            // ---- Shipping + payment method step ----
+            <form onSubmit={placeOrder}>
+              {error && <div className="error-msg">{error}</div>}
+              <div className="field">
+                <label>Delivery address</label>
+                <input value={form.address} onChange={set("address")} required />
+              </div>
+              <div className="field">
+                <label>City</label>
+                <input value={form.city} onChange={set("city")} required />
+              </div>
+              <div className="field">
+                <label>Phone</label>
+                <input value={form.phone} onChange={set("phone")} required />
+              </div>
+              <div className="field">
+                <label>Payment method</label>
+                <label style={{ display: "flex", alignItems: "center", gap: 8, fontWeight: 400, cursor: "pointer" }}>
+                  <input type="radio" name="pay" value="cod" checked={method === "cod"} onChange={() => setMethod("cod")} />
+                  Cash on Delivery
+                </label>
+                <label style={{ display: "flex", alignItems: "center", gap: 8, fontWeight: 400, cursor: "pointer", marginTop: 6 }}>
+                  <input type="radio" name="pay" value="card" checked={method === "card"} onChange={() => setMethod("card")} />
+                  Credit / debit card
+                </label>
+                <p className="muted" style={{ marginTop: 6 }}>
+                  {method === "cod"
+                    ? "Pay in cash when your order arrives at your doorstep."
+                    : "Pay securely by card. You'll enter your card details on the next step."}
+                </p>
+              </div>
+              <button className="btn" disabled={busy} style={{ width: "100%" }}>
+                {busy
+                  ? method === "card"
+                    ? "Preparing payment..."
+                    : "Placing order..."
+                  : method === "card"
+                  ? "Continue to payment"
+                  : "Place order"}
+              </button>
+            </form>
+          )}
+        </div>
         <div className="cart-summary" style={{ marginTop: 0 }}>
           <strong>Order summary</strong>
           {items.map((i) => (
-            <div key={i.id} style={{ display: "flex", justifyContent: "space-between", fontSize: 14, margin: "8px 0" }}>
-              <span>{i.name} x {i.qty}</span>
+            <div key={i.key} style={{ display: "flex", justifyContent: "space-between", fontSize: 14, margin: "8px 0" }}>
+              <span>{i.name}{i.size ? ` (${i.size})` : ""} x {i.qty}</span>
               <span>Rs {(i.price * i.qty).toLocaleString()}</span>
             </div>
           ))}
           <hr style={{ border: "none", borderTop: "1px solid var(--border)", margin: "10px 0" }} />
           <div style={{ display: "flex", justifyContent: "space-between" }}>
-            <span>Total (COD)</span>
+            <span>Total</span>
             <strong>Rs {total.toLocaleString()}</strong>
           </div>
         </div>
