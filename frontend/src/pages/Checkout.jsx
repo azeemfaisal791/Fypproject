@@ -102,19 +102,20 @@ export default function Checkout() {
               </div>
               <div className="field">
                 <label>Payment method</label>
-                <label style={{ display: "flex", alignItems: "center", gap: 8, fontWeight: 400, cursor: "pointer" }}>
+                <label className={`pay-option${method === "cod" ? " selected" : ""}`}>
                   <input type="radio" name="pay" value="cod" checked={method === "cod"} onChange={() => setMethod("cod")} />
-                  Cash on Delivery
+                  <span className="pay-option-body">
+                    <span className="pay-option-title">💵 Cash on Delivery</span>
+                    <span className="muted">Pay in cash when your order arrives at your doorstep.</span>
+                  </span>
                 </label>
-                <label style={{ display: "flex", alignItems: "center", gap: 8, fontWeight: 400, cursor: "pointer", marginTop: 6 }}>
+                <label className={`pay-option${method === "card" ? " selected" : ""}`}>
                   <input type="radio" name="pay" value="card" checked={method === "card"} onChange={() => setMethod("card")} />
-                  Credit / debit card
+                  <span className="pay-option-body">
+                    <span className="pay-option-title">💳 Credit / debit card</span>
+                    <span className="muted">Pay securely by card. You'll enter your card details on the next step.</span>
+                  </span>
                 </label>
-                <p className="muted" style={{ marginTop: 6 }}>
-                  {method === "cod"
-                    ? "Pay in cash when your order arrives at your doorstep."
-                    : "Pay securely by card. You'll enter your card details on the next step."}
-                </p>
               </div>
               <button className="btn" disabled={busy} style={{ width: "100%" }}>
                 {busy

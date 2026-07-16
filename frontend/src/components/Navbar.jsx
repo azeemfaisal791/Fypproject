@@ -1,4 +1,4 @@
-import { Link, useNavigate } from "react-router-dom";
+import { Link, NavLink, useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext.jsx";
 import { useCart } from "../context/CartContext.jsx";
 
@@ -12,29 +12,37 @@ export default function Navbar() {
     navigate("/login");
   };
 
+  // Adds the "nav-active" class to whichever route is currently open.
+  const navClass = ({ isActive }) => (isActive ? "nav-active" : "");
+
   return (
     <nav className="navbar">
       <div className="container navbar-inner">
-        <Link to="/" className="brand">SmartShop</Link>
+        <Link to="/" className="brand">
+          <span className="brand-mark">S</span>
+          SmartShop
+        </Link>
         <div className="nav-links">
-          <Link to="/products">Products</Link>
-          {user?.role === "admin" && <Link to="/admin">Admin Panel</Link>}
+          <NavLink to="/products" className={navClass}>Products</NavLink>
+          {user?.role === "admin" && <NavLink to="/admin" className={navClass}>Admin Panel</NavLink>}
           {user?.role !== "admin" && (
-            <Link to="/cart">
-              Cart{count > 0 && <span className="badge">{count}</span>}
-            </Link>
+            <NavLink to="/cart" className={navClass}>
+              <span className="nav-cart">
+                🛒 Cart{count > 0 && <span className="badge">{count}</span>}
+              </span>
+            </NavLink>
           )}
           {user ? (
             <>
-              {user.role === "customer" && <Link to="/orders">My Orders</Link>}
-              <Link to="/profile">{user.name.split(" ")[0]}</Link>
+              {user.role === "customer" && <NavLink to="/orders" className={navClass}>My Orders</NavLink>}
+              <NavLink to="/profile" className={navClass}>{user.name.split(" ")[0]}</NavLink>
               <button className="btn btn-sm btn-outline" onClick={handleLogout}>
                 Log out
               </button>
             </>
           ) : (
             <>
-              <Link to="/login">Log in</Link>
+              <NavLink to="/login" className={navClass}>Log in</NavLink>
               <Link to="/register" className="btn btn-sm">Sign up</Link>
             </>
           )}

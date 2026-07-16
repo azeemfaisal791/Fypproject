@@ -53,7 +53,7 @@ export default function Cart() {
     return (
       <div className="container page">
         <h1>Your cart</h1>
-        {notice && <div className="error-msg" style={{ marginTop: 10 }}>{notice}</div>}
+        {notice && <div className="info-msg" style={{ marginTop: 10 }}>{notice}</div>}
         <p className="muted" style={{ marginTop: 10 }}>
           Your cart is empty. <Link to="/products">Browse products</Link> to get started.
         </p>
@@ -64,7 +64,7 @@ export default function Cart() {
   return (
     <div className="container page">
       <h1>Your cart</h1>
-      {notice && <div className="error-msg" style={{ marginTop: 10 }}>{notice}</div>}
+      {notice && <div className="info-msg" style={{ marginTop: 10 }}>{notice}</div>}
       <div style={{ marginTop: 16 }}>
         {items.map((i) => (
           <div className="cart-row" key={i.key}>

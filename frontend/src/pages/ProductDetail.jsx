@@ -42,7 +42,18 @@ export default function ProductDetail() {
   if (loading) {
     return (
       <div className="container page">
-        <p className="muted">Loading...</p>
+        <div style={{ display: "flex", gap: 32, flexWrap: "wrap" }} aria-busy="true" aria-label="Loading product">
+          <div className="skeleton" style={{ width: 380, maxWidth: "100%", aspectRatio: "4 / 5", borderRadius: 6 }} />
+          <div style={{ flex: 1, minWidth: 260, display: "flex", flexDirection: "column", gap: 14 }}>
+            <div className="skeleton sk-line med" style={{ height: 28 }} />
+            <div className="skeleton sk-line short" style={{ height: 14 }} />
+            <div className="skeleton sk-line" style={{ height: 26, width: "30%" }} />
+            <div className="skeleton sk-line" style={{ height: 12 }} />
+            <div className="skeleton sk-line" style={{ height: 12 }} />
+            <div className="skeleton sk-line med" style={{ height: 12 }} />
+            <div className="skeleton" style={{ height: 42, width: 140, borderRadius: 6, marginTop: 8 }} />
+          </div>
+        </div>
       </div>
     );
   }

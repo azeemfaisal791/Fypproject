@@ -25,12 +25,21 @@ export default function Home() {
     <div className="page" style={{ paddingTop: 0 }}>
       <div className="hero">
         <div className="container">
+          <span className="hero-eyebrow">✨ AI-powered shopping</span>
           <h1>Men's fashion, made smarter</h1>
           <p>
             T-shirts, trousers, jeans and sleepwear - with AI recommendations,
             voice and image search, and a 24/7 assistant.
           </p>
-          <Link to="/products" className="btn">Browse products</Link>
+          <div className="hero-actions">
+            <Link to="/products" className="btn">Browse products</Link>
+            <Link to="/products" className="btn btn-outline">Try voice &amp; image search</Link>
+          </div>
+          <div className="hero-features">
+            <span className="hero-feature">🤖 AI recommendations</span>
+            <span className="hero-feature">🎙️ Voice &amp; image search</span>
+            <span className="hero-feature">💬 24/7 assistant</span>
+          </div>
         </div>
       </div>
 

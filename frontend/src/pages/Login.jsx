@@ -81,9 +81,9 @@ export default function Login() {
           </button>
           <p className="muted" style={{ marginTop: 12 }}>
             Wrong account?{" "}
-            <a href="#" onClick={(e) => { e.preventDefault(); setStep("credentials"); setOtp(""); setError(""); }}>
+            <button type="button" className="link-btn" onClick={() => { setStep("credentials"); setOtp(""); setError(""); }}>
               Go back
-            </a>
+            </button>
           </p>
         </form>
       </div>

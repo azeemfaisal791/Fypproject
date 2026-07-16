@@ -145,7 +145,18 @@ export default function Products() {
       {imageBusy ? (
         <p className="muted">Analyzing your image with AI...</p>
       ) : !showingVisual && loading ? (
-        <p className="muted">Loading products...</p>
+        <div className="grid" aria-busy="true" aria-label="Loading products">
+          {Array.from({ length: 8 }).map((_, i) => (
+            <div className="skeleton-card" key={i}>
+              <div className="skeleton sk-img" />
+              <div className="sk-body">
+                <div className="skeleton sk-line med" />
+                <div className="skeleton sk-line short" />
+                <div className="skeleton sk-line short" />
+              </div>
+            </div>
+          ))}
+        </div>
       ) : list.length === 0 ? (
         <p className="muted">
           {showingVisual
