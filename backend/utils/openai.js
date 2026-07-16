@@ -14,6 +14,10 @@ const MODEL = process.env.OPENAI_MODEL || "gpt-4o-mini";
 const VISION_MODEL = process.env.OPENAI_VISION_MODEL || "meta-llama/llama-4-scout-17b-16e-instruct";
 // Speech-to-text model for voice search (Vision 5.4).
 const STT_MODEL = process.env.OPENAI_STT_MODEL || "whisper-large-v3-turbo";
+// Language hint for Whisper. Without it, Whisper auto-detects and often
+// transcribes accented English phonetically into another script (e.g.
+// Devanagari), so we pin English by default. Override via .env if needed.
+const STT_LANGUAGE = process.env.OPENAI_STT_LANGUAGE || "en";
 
 // Shared request/error handling for text and vision chat calls
 async function callProvider(body) {
@@ -103,6 +107,9 @@ async function transcribeAudio(buffer, filename = "audio.webm", mimeType = "audi
   fd.append("file", new Blob([buffer], { type: mimeType }), filename);
   fd.append("model", STT_MODEL);
   fd.append("response_format", "json");
+  // Pin the spoken language so accented English isn't mis-detected and
+  // transcribed into another script (e.g. Hindi/Devanagari).
+  if (STT_LANGUAGE) fd.append("language", STT_LANGUAGE);
 
   let res, data;
   try {
