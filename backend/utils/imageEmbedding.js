@@ -145,7 +145,14 @@ async function frozenFeatures(buffer) {
 // catalog; its hidden layer is a fashion-AWARE embedding that clusters by
 // garment type far better than the raw ImageNet features. If the head hasn't
 // been trained yet, embedImage() transparently falls back to frozen features.
-let head = null; // { inDim, outDim, W1:Float32Array, b1:Float32Array, categories }
+// The trained head has TWO layers, both persisted in model/visual-head.json:
+//   embedding:  1280 -> EMB   (ReLU)  -> used as the similarity embedding
+//   classifier: EMB  -> N     (softmax) -> predicts the garment CATEGORY
+// The classifier is what the visual-search route actually trusts: it predicts a
+// category + confidence, and only high-confidence predictions are used (low
+// confidence -> the route falls back to the vision-LLM engine). Older model
+// files without the classifier still load (classify() then returns null).
+let head = null; // { inDim, embDim, W1, b1, W2?, b2?, numClasses?, categories }
 let headTried = false;
 
 function loadHead() {
@@ -155,15 +162,21 @@ function loadHead() {
     const j = JSON.parse(
       fs.readFileSync(path.join(__dirname, "..", "model", "visual-head.json"), "utf8")
     );
+    const embDim = j.embDim || j.outDim; // new field, with back-compat
     head = {
       inDim: j.inDim,
-      outDim: j.outDim,
-      W1: Float32Array.from(j.W1), // row-major [inDim][outDim]
+      embDim,
+      W1: Float32Array.from(j.W1), // embedding kernel, row-major [inDim][embDim]
       b1: Float32Array.from(j.b1),
       categories: j.categories,
+      // classifier layer (present in the new format only)
+      numClasses: j.numClasses || (j.categories ? j.categories.length : 0),
+      W2: j.W2 ? Float32Array.from(j.W2) : null, // [embDim][numClasses]
+      b2: j.b2 ? Float32Array.from(j.b2) : null,
     };
     console.log(
-      `[cnn] Fine-tuned head loaded (${j.inDim}->${j.outDim}, ${j.categories.length} classes) — using learned embedding.`
+      `[cnn] Fine-tuned head loaded (${j.inDim}->${embDim}` +
+        `${head.W2 ? `->${head.numClasses} classes, with classifier` : `, embedding only`}).`
     );
   } catch {
     head = null; // not trained yet -> frozen-feature fallback
@@ -171,16 +184,50 @@ function loadHead() {
   return head;
 }
 
-// frozen features -> learned embedding:  L2normalize( ReLU(features · W1 + b1) )
-function projectHead(features) {
-  const { W1, b1, inDim, outDim } = head;
-  const out = new Array(outDim);
-  for (let j = 0; j < outDim; j++) {
+// frozen features -> hidden activation:  ReLU(features · W1 + b1)   (embDim-d)
+function hiddenActivation(features) {
+  const { W1, b1, inDim, embDim } = head;
+  const out = new Float32Array(embDim);
+  for (let j = 0; j < embDim; j++) {
     let s = b1[j];
-    for (let i = 0; i < inDim; i++) s += features[i] * W1[i * outDim + j];
+    for (let i = 0; i < inDim; i++) s += features[i] * W1[i * embDim + j];
     out[j] = s > 0 ? s : 0; // ReLU
   }
-  return l2normalize(out);
+  return out;
+}
+
+// frozen features -> learned embedding used for similarity (L2-normalized hidden)
+function projectHead(features) {
+  return l2normalize(Array.from(hiddenActivation(features)));
+}
+
+// hidden activation -> softmax over categories -> { category, confidence, probs }
+function classifyHidden(hidden) {
+  const { W2, b2, embDim, numClasses, categories } = head;
+  const logits = new Float32Array(numClasses);
+  for (let k = 0; k < numClasses; k++) {
+    let s = b2[k];
+    for (let j = 0; j < embDim; j++) s += hidden[j] * W2[j * numClasses + k];
+    logits[k] = s;
+  }
+  // numerically-stable softmax
+  let max = -Infinity;
+  for (const v of logits) if (v > max) max = v;
+  let sum = 0;
+  const probs = new Array(numClasses);
+  for (let k = 0; k < numClasses; k++) { probs[k] = Math.exp(logits[k] - max); sum += probs[k]; }
+  let best = 0;
+  for (let k = 0; k < numClasses; k++) { probs[k] /= sum; if (probs[k] > probs[best]) best = k; }
+  return { category: categories[best], confidence: probs[best], probs };
+}
+
+// image buffer -> predicted { category, confidence, probs }, or null if the
+// model has no classifier (old format) or can't be loaded.
+async function classifyImage(buffer) {
+  const h = loadHead();
+  if (!h || !h.W2) return null;
+  const features = await frozenFeatures(buffer);
+  return classifyHidden(hiddenActivation(features));
 }
 
 // image buffer -> L2-normalized embedding used for similarity search. Uses the
@@ -189,6 +236,20 @@ async function embedImage(buffer) {
   const features = await frozenFeatures(buffer);
   const h = loadHead();
   return h ? projectHead(features) : features;
+}
+
+// image buffer -> { embedding, prediction } from a SINGLE MobileNet pass.
+// Used by the visual-search route so a query isn't run through the CNN twice.
+// prediction is null when the model has no classifier (old/embedding-only file).
+async function analyzeImage(buffer) {
+  const features = await frozenFeatures(buffer);
+  const h = loadHead();
+  if (!h) return { embedding: features, prediction: null };
+  const hidden = hiddenActivation(features);
+  return {
+    embedding: l2normalize(Array.from(hidden)),
+    prediction: h.W2 ? classifyHidden(hidden) : null,
+  };
 }
 
 function l2normalize(vec) {
@@ -223,4 +284,4 @@ async function embedProductImage(product) {
   }
 }
 
-module.exports = { isAvailable, embedImage, frozenFeatures, cosineSimilarity, embedProductImage };
+module.exports = { isAvailable, embedImage, classifyImage, analyzeImage, frozenFeatures, cosineSimilarity, embedProductImage };

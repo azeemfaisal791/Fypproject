@@ -23,8 +23,8 @@ const Product = require("./models/Product");
 const { frozenFeatures } = require("./utils/imageEmbedding");
 
 const MONGO_URI = process.env.MONGO_URI || "mongodb://127.0.0.1:27017/ai_ecommerce";
-const EMB_DIM = 256; // size of the learned embedding (head hidden layer)
-const EPOCHS = 80;
+const EMB_DIM = 128; // size of the learned embedding (head hidden layer)
+const EPOCHS = 120;
 
 // Data augmentation: expand each catalog image into several plausible variants
 // so the tiny catalog is enough to train a stable head. Done at the IMAGE level
@@ -96,7 +96,7 @@ function shuffle(a, b) {
 
   const model = tf.sequential();
   model.add(tf.layers.dense({ inputShape: [inDim], units: EMB_DIM, activation: "relu", name: "embedding" }));
-  model.add(tf.layers.dropout({ rate: 0.3 }));
+  model.add(tf.layers.dropout({ rate: 0.4 }));
   model.add(tf.layers.dense({ units: categories.length, activation: "softmax", name: "classifier" }));
   model.compile({ optimizer: tf.train.adam(0.001), loss: "categoricalCrossentropy", metrics: ["accuracy"] });
 
@@ -118,20 +118,35 @@ function shuffle(a, b) {
     },
   });
 
-  // Persist the embedding layer's weights (row-major) so imageEmbedding.js can
-  // project frozen features -> learned embedding at inference without tfjs I/O.
-  const [kernel, bias] = model.getLayer("embedding").getWeights();
-  const W1 = await kernel.array(); // [inDim][EMB_DIM]
-  const b1 = await bias.array(); // [EMB_DIM]
-  const flatW1 = [];
-  for (let i = 0; i < inDim; i++) for (let j = 0; j < EMB_DIM; j++) flatW1.push(W1[i][j]);
+  // Persist BOTH layers' weights (row-major) so imageEmbedding.js can, without
+  // any tfjs I/O at inference: project frozen features -> learned embedding
+  // (W1,b1) for similarity ranking, and predict the garment category
+  // (W2,b2 -> softmax). The classifier is what the visual-search route trusts.
+  const [k1, b1t] = model.getLayer("embedding").getWeights(); // [inDim][EMB_DIM], [EMB_DIM]
+  const [k2, b2t] = model.getLayer("classifier").getWeights(); // [EMB_DIM][classes], [classes]
+  const W1 = await k1.array(), b1 = await b1t.array();
+  const W2 = await k2.array(), b2 = await b2t.array();
+  const flat = (M, r, c) => { const o = []; for (let i = 0; i < r; i++) for (let j = 0; j < c; j++) o.push(M[i][j]); return o; };
 
   const outDir = path.join(__dirname, "model");
   fs.mkdirSync(outDir, { recursive: true });
   const outPath = path.join(outDir, "visual-head.json");
-  fs.writeFileSync(outPath, JSON.stringify({ inDim, outDim: EMB_DIM, categories, W1: flatW1, b1 }));
+  fs.writeFileSync(
+    outPath,
+    JSON.stringify({
+      inDim,
+      outDim: EMB_DIM, // kept for back-compat with older imageEmbedding.js
+      embDim: EMB_DIM,
+      numClasses: categories.length,
+      categories,
+      W1: flat(W1, inDim, EMB_DIM),
+      b1,
+      W2: flat(W2, EMB_DIM, categories.length),
+      b2,
+    })
+  );
 
-  console.log(`\nSaved fine-tuned head -> ${outPath}`);
+  console.log(`\nSaved fine-tuned head (embedding + classifier) -> ${outPath}`);
   console.log("Next:  node embedProducts.js --force   (re-index the catalog with the learned embedding)");
 
   await mongoose.disconnect();

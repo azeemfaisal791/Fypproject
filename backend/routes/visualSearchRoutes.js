@@ -37,11 +37,16 @@ const upload = multer({
   },
 });
 
-// Minimum cosine similarity to count as a match (tune with your test set).
-// MobileNet embeddings of genuinely-similar fashion photos typically score
-// ~0.4-0.65, so 0.5 discarded real matches; 0.35 keeps them. Override with
-// VISUAL_SIM_THRESHOLD in .env.
-const SIM_THRESHOLD = parseFloat(process.env.VISUAL_SIM_THRESHOLD || "0.35");
+// The CNN engine trusts its CLASSIFIER, not raw embedding similarity. On a small
+// catalog, MobileNet embeddings are not discriminative enough to rank across
+// categories (everything scores ~0.9), so instead the trained head predicts the
+// garment CATEGORY and we only act on confident predictions. Below this
+// confidence — ambiguous garments and non-clothing photos — the route falls
+// back to the vision-LLM engine. Tuned against backend/test-images: at 0.90 no
+// non-clothing image passes the gate (so junk photos always fall through to the
+// VLM), and of the confident predictions ~75% are correct. Override with
+// VISUAL_CNN_CONFIDENCE in .env.
+const CNN_CONFIDENCE = parseFloat(process.env.VISUAL_CNN_CONFIDENCE || "0.90");
 const LIMIT = 12;
 const MAX_ENCODED_BYTES = 3 * 1024 * 1024; // provider base64 limit (VLM engine)
 
@@ -65,41 +70,56 @@ async function prepareImage(file) {
 const escapeRegex = (s) => String(s).trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 // ---------------------------------------------------------------- CNN engine
+// Predict the garment category with the trained classifier, and only return
+// results when the model is confident. Any of these throw so the route can fall
+// back to the VLM engine:  NO_CLASSIFIER (old/missing model), LOW_CONFIDENCE
+// (ambiguous or non-clothing), EMPTY_CATEGORY (predicted category has no stock).
 async function cnnSearch(imageBuffer) {
-  const queryVec = await cnn.embedImage(imageBuffer);
+  const { embedding, prediction } = await cnn.analyzeImage(imageBuffer);
 
-  const products = await Product.find({
-    isActive: true,
-    imageEmbedding: { $exists: true, $ne: [] },
-  }).select("+imageEmbedding");
+  if (!prediction) {
+    const err = new Error("CNN model has no classifier — run `node trainVisualModel.js`");
+    err.code = "NO_CLASSIFIER";
+    throw err;
+  }
 
+  const { category, confidence } = prediction;
+
+  if (confidence < CNN_CONFIDENCE) {
+    const err = new Error(`CNN not confident (${category} ${Math.round(confidence * 100)}%)`);
+    err.code = "LOW_CONFIDENCE";
+    throw err;
+  }
+
+  // Confident prediction -> return that category's products, ranked by embedding
+  // similarity to the query so the closest-looking items come first. (Ranking is
+  // WITHIN the correct category, where embedding cosine is a reliable ordering.)
+  const products = await Product.find({ isActive: true, category }).select("+imageEmbedding");
   if (products.length === 0) {
-    // Catalog not indexed yet -> let the caller fall back to the VLM
-    const err = new Error("No product embeddings found — run `node embedProducts.js`");
-    err.code = "NO_INDEX";
+    const err = new Error(`No active products in predicted category "${category}"`);
+    err.code = "EMPTY_CATEGORY";
     throw err;
   }
 
   const scored = products
-    .map((p) => ({ product: p, similarity: cnn.cosineSimilarity(queryVec, p.imageEmbedding) }))
-    .sort((a, b) => b.similarity - a.similarity);
-
-  const matches = scored.filter((s) => s.similarity >= SIM_THRESHOLD).slice(0, LIMIT);
+    .map((p) => ({
+      product: p,
+      similarity:
+        p.imageEmbedding && p.imageEmbedding.length ? cnn.cosineSimilarity(embedding, p.imageEmbedding) : 0,
+    }))
+    .sort((a, b) => b.similarity - a.similarity)
+    .slice(0, LIMIT);
 
   return {
     engine: "cnn",
-    analysis: null,
-    products: matches.map(({ product, similarity }) => {
+    analysis: { category, keywords: [] },
+    confidence: Math.round(confidence * 100) / 100,
+    products: scored.map(({ product, similarity }) => {
       const obj = product.toJSON();
       delete obj.imageEmbedding; // never leak the vector to the client
       obj.similarity = Math.round(similarity * 100) / 100;
       return obj;
     }),
-    bestSimilarity: scored.length ? Math.round(scored[0].similarity * 100) / 100 : 0,
-    message:
-      matches.length === 0
-        ? "No visually similar products found in our catalog. Try a clearer photo of a garment."
-        : undefined,
   };
 }
 
@@ -188,14 +208,18 @@ router.post("/visual", (req, res) => {
           if (engine === "cnn") {
             // Explicitly requested CNN -> report honestly instead of switching
             console.error("[visual-search] CNN engine failed:", cnnErr.message);
-            return res.status(503).json({
-              message:
-                cnnErr.code === "NO_INDEX"
-                  ? "CNN index missing. Run `node embedProducts.js` in the backend folder."
-                  : "CNN engine unavailable.",
-            });
+            const forcedMsg =
+              cnnErr.code === "LOW_CONFIDENCE"
+                ? `CNN wasn't confident enough to classify this image (${cnnErr.message}). In auto mode this falls back to the VLM engine.`
+                : cnnErr.code === "NO_CLASSIFIER"
+                ? "CNN model has no classifier. Run `node trainVisualModel.js` then `node embedProducts.js --force`."
+                : cnnErr.code === "EMPTY_CATEGORY"
+                ? cnnErr.message
+                : "CNN engine unavailable.";
+            return res.status(200).json({ engine: "cnn", products: [], analysis: null, message: forcedMsg });
           }
-          console.warn(`[visual-search] CNN unavailable (${cnnErr.message}) — falling back to VLM.`);
+          // Auto mode: low confidence / non-clothing / any CNN error -> VLM
+          console.warn(`[visual-search] CNN fell through (${cnnErr.code || cnnErr.message}) — using VLM.`);
         }
       } else if (engine === "cnn") {
         return res.status(503).json({
