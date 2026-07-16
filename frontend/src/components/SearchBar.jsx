@@ -21,7 +21,12 @@ export default function SearchBar({ onSearch, onImageSelect, imageBusy = false }
   };
 
   const applyTranscript = (text) => {
-    const clean = (text || "").trim();
+    // Whisper adds sentence punctuation (e.g. "Polo Shirts.") which breaks
+    // matching, so strip leading/trailing punctuation and collapse spaces.
+    const clean = (text || "")
+      .trim()
+      .replace(/^[\p{P}\s]+|[\p{P}\s]+$/gu, "")
+      .replace(/\s+/g, " ");
     if (!clean) return;
     setQuery(clean);
     onSearch(clean);
